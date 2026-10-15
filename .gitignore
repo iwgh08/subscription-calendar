@@ -1,0 +1,10 @@
+# 실제 은행 거래내역·백업 파일은 절대 올리지 않는다 (개인 금융 정보)
+*.xls
+*.xlsx
+*.csv
+*.txt
+*backup*.json
+*백업*.json
+
+node_modules/
+.claude/settings.local.json

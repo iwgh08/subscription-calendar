@@ -1,0 +1,13 @@
+{
+  "name": "subscription-calendar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "구독달력 — 정기 구독료와 월 지출을 보는 아이폰용 PWA",
+  "scripts": {
+    "start": "node tools/serve.js",
+    "test": "node --test \"tests/*.test.js\""
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

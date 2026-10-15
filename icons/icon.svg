@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 배경을 꽉 채운다(아이폰은 투명한 곳을 검게 칠하고, maskable은 가운데 원 안만 보장된다) -->
+  <rect width="512" height="512" fill="#1c5cab"/>
+  <!-- 달력 -->
+  <rect x="128" y="150" width="256" height="228" rx="36" fill="#ffffff"/>
+  <path d="M164 150h184a36 36 0 0 1 36 36v38H128v-38a36 36 0 0 1 36-36z" fill="#9ec5f4"/>
+  <rect x="184" y="118" width="22" height="62" rx="11" fill="#ffffff"/>
+  <rect x="306" y="118" width="22" height="62" rx="11" fill="#ffffff"/>
+  <!-- 날짜 칸 -->
+  <g fill="#cde2fb">
+    <circle cx="178" cy="270" r="15"/>
+    <circle cx="230" cy="270" r="15"/>
+    <circle cx="282" cy="270" r="15"/>
+    <circle cx="334" cy="270" r="15"/>
+    <circle cx="178" cy="326" r="15"/>
+    <circle cx="230" cy="326" r="15"/>
+    <circle cx="334" cy="326" r="15"/>
+  </g>
+  <!-- 결제일 -->
+  <circle cx="282" cy="326" r="24" fill="#eb6834"/>
+  <path d="M271 326l8 8 15-16" fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
