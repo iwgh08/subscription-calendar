@@ -22,7 +22,11 @@
     ];
     const first = C.addMonths(t.y, t.m, -5);
     const expenses = [];
+    const incomes = [];
     for (let d = C.ymd(first.y, first.m, 1); d <= today; d = C.addDays(d, 1)) {
+      const day = C.parseYmd(d).d;
+      if (day === 1) incomes.push({ id: `p${incomes.length}`, date: d, amount: 300000, title: '용돈', memo: '' });
+      if (day === 20) incomes.push({ id: `p${incomes.length}`, date: d, amount: 420000, title: '알바비', memo: '' });
       const n = Math.floor(rand() * 3);
       for (let i = 0; i < n; i++) {
         const [title, lo, hi] = pick([
@@ -37,7 +41,11 @@
         expenses.push({ id: `x${expenses.length}`, date: d, amount: Math.round((lo + rand() * (hi - lo)) / 100) * 100, title, memo: '' });
       }
     }
-    return { version: 2, subs, expenses, settings: { lastBackupAt: null }, updatedAt: new Date().toISOString() };
+    // 6주 전 저녁에 잔액을 맞춰 둔 것으로 한다(가짜 금액)
+    const anchor = C.addDays(today, -42);
+    const a = C.parseYmd(anchor);
+    const balance = { amount: 850000, date: anchor, setAt: new Date(a.y, a.m - 1, a.d, 21, 0).toISOString(), paidToday: true };
+    return { version: 3, subs, expenses, incomes, balance, settings: { lastBackupAt: null }, updatedAt: new Date().toISOString() };
   }
 
   root.Demo = { build };

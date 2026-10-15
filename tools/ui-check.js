@@ -168,6 +168,11 @@ async function demoScreens() {
       await b.shot(`1-${v}`);
     }
     await b.tab('home');
+    check('샘플: 홈에 지금 통장 잔액', /^-?[\d,]+원$/.test(await b.eval(text('#balanceHero'))), await b.eval(text('#balanceHero')));
+    await b.click('[data-action="balance"]');
+    check('잔액 맞추기: 시트에 앱 계산 값과 입력 칸', await b.eval("!!document.querySelector('#balForm [name=\"amount\"]') && document.querySelector('#balForm').innerText.includes('지금 앱 계산')"));
+    await b.shot('2-balance-sheet');
+    await b.click('[data-action="close-sheet"]');
     await b.eval("document.querySelector('#chart').scrollIntoView({ block: 'center' })");
     await b.click('#chart rect.hit:last-of-type');
     check('그래프: 막대를 누르면 말풍선', await b.eval("!!document.querySelector('#chart .tooltip')"));
@@ -183,8 +188,12 @@ async function demoScreens() {
     await b.click('[data-action="close-sheet"]');
     await b.tab('spend');
     await b.click('#view-spend [data-action="edit-exp"]');
-    check('지출: 항목을 누르면 수정 시트', await b.eval("!!document.querySelector('#expForm')"));
+    check('내역: 지출을 누르면 수정 시트', await b.eval("!!document.querySelector('#expForm')"));
     await b.shot('5-exp-sheet');
+    await b.click('[data-action="close-sheet"]');
+    check('내역: 수입은 + 금액과 "수입" 표시', await b.eval("(() => { const r = document.querySelector('#view-spend [data-action=\"edit-inc\"]'); return !!r && r.innerText.includes('수입') && r.querySelector('.amt').innerText.startsWith('+'); })()"));
+    await b.click('#view-spend [data-action="edit-inc"]');
+    check('내역: 수입을 누르면 "수입 수정" 시트(종류가 수입)', (await b.eval(text('#sheetTitle'))) === '수입 수정' && (await b.eval("document.querySelector('#expForm input[name=\"kind\"][value=\"in\"]').checked")));
     await b.click('[data-action="close-sheet"]');
     await b.click('[data-action="settings"]');
     await b.shot('6-settings');
@@ -262,7 +271,8 @@ async function syncFlow() {
     await phone.fill('#syncToken', 'test-ro');
     await phone.eval("document.querySelector('input[name=\"syncRole\"][value=\"reader\"]').checked = true");
     await phone.click('[data-action="sync-connect"]');
-    check('폰: 보기 기기로 연결해 받아옴', await phone.waitFor(`${text('#view-home .hero')} === '52,400원'`), await phone.eval(text('#view-home .hero')));
+    check('폰: 보기 기기로 연결해 받아옴', await phone.waitFor(`${text('#monthTotal')} === '52,400원'`), await phone.eval(text('#monthTotal')));
+    check('폰: 잔액을 안 맞췄으면 "PC에서 적어 두면" 안내만', await phone.eval("!document.querySelector('#balanceHero') && !document.querySelector('[data-action=\"balance\"]')"));
     check('폰: 이 기기 데이터를 바꾸기 전에 확인을 받음', phone.dialogs.some((d) => d.includes('PC에서 올린 내용으로 바꿀까요')), phone.dialogs.join(' | '));
     const bar = await phone.eval(text('#syncbar'));
     check('폰: 상태 줄에 PC 수정 시각과 받아온 시각', bar.includes('PC 수정') && bar.includes('받아옴') && !bar.includes('PC 수정 -'), bar);
@@ -281,7 +291,52 @@ async function syncFlow() {
     check('PC: 추가분 저장됨', await saved());
     await phone.tab('home');
     await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
-    check('폰: 화면으로 돌아오면 새 값(62,400원)', await phone.waitFor(`${text('#view-home .hero')} === '62,400원'`), await phone.eval(text('#view-home .hero')));
+    check('폰: 화면으로 돌아오면 새 값(62,400원)', await phone.waitFor(`${text('#monthTotal')} === '62,400원'`), await phone.eval(text('#monthTotal')));
+
+    // ----- 잔액: PC에서 맞춘 뒤 적은 수입은 더하고 지출은 뺀다. 수입은 총 지출에 안 들어간다. 폰도 같은 값 -----
+    // 오늘이 구독 결제일(3일)이면 '이미 빠졌어요'가 체크된 채로 저장된다 → 어느 날 돌려도 100,000원에서 시작
+    const today = `${ym}-${String(now.getDate()).padStart(2, '0')}`;
+    await pc.tab('home');
+    await pc.click('[data-action="balance"]');
+    await pc.fill('#balForm [name="amount"]', '100,000');
+    await pc.eval("document.querySelector('#balForm').requestSubmit()");
+    check('잔액: 맞춘 값이 그대로 보임(100,000원)', await pc.waitFor(`${text('#balanceHero')} === '100,000원'`), await pc.eval(text('#balanceHero')));
+    await pc.tab('spend');
+    await pc.eval(`(() => { const f = document.querySelector('#quickAdd'); f.querySelector('input[name="kind"][value="in"]').checked = true; f.elements.date.value = '${today}'; f.elements.amount.value = '30,000'; f.elements.title.value = '용돈'; })()`);
+    await pc.pressEnter('#quickAdd [name="title"]');
+    check('수입: 추가하면 빠른 입력이 다시 "지출"로', await pc.eval("document.querySelector('#quickAdd input[name=\"kind\"][value=\"out\"]').checked"));
+    check('수입: 내역에 "+30,000원"', (await pc.eval(text('#view-spend'))).includes('+30,000원'), await pc.eval(text('#view-spend')));
+    await pc.fill('#quickAdd [name="amount"]', '5,000');
+    await pc.fill('#quickAdd [name="title"]', '간식');
+    await pc.pressEnter('#quickAdd [name="title"]');
+    await pc.tab('home');
+    check('잔액: 수입 +30,000 · 지출 -5,000 반영(125,000원)', (await pc.eval(text('#balanceHero'))) === '125,000원', await pc.eval(text('#view-home .card')));
+    check('수입은 총 지출에 안 들어감(62,400 + 5,000 = 67,400원)', (await pc.eval(text('#monthTotal'))) === '67,400원', await pc.eval(text('#monthTotal')));
+    check('PC: 잔액·수입 저장됨', await saved(), await pc.eval(text('#syncbar')));
+    r = await remote();
+    check('가짜 저장소: 수입 1건·잔액 100,000원', r.incomes.length === 1 && r.balance && r.balance.amount === 100000, JSON.stringify({ incomes: r.incomes, balance: r.balance }));
+    await pc.shot('8-pc-home-balance');
+    await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('폰: 같은 잔액(125,000원)', await phone.waitFor(`${text('#balanceHero')} === '125,000원'`), await phone.eval(text('#view-home')));
+    check('폰: "잔액 맞추기" 버튼 없음', await phone.eval("!document.querySelector('[data-action=\"balance\"]')"));
+    await phone.shot('9-phone-home-balance');
+
+    // ----- 옛 앱(수입·잔액을 모름)이 받아 저장해 둔 폰: 새 앱으로 열면 원격이 그대로여도 다시 받는다 -----
+    await phone.eval(`new Promise((res, rej) => {
+      const o = indexedDB.open('subcal', 1);
+      o.onerror = () => rej(o.error);
+      o.onsuccess = () => {
+        const db = o.result;
+        const tx = db.transaction('kv', 'readwrite');
+        const store = tx.objectStore('kv');
+        const g = store.get('state');
+        g.onsuccess = () => { const s = g.result; delete s.incomes; delete s.balance; s.version = 2; store.put(s, 'state'); };
+        tx.oncomplete = () => { db.close(); res(true); };
+        tx.onerror = () => rej(tx.error);
+      };
+    })`);
+    await phone.goto(`${G}#home`);
+    check('폰: 옛 형식으로 저장돼 있으면 다시 받아와서 잔액이 보임', await phone.waitFor(`${text('#balanceHero')} === '125,000원'`), await phone.eval(text('#view-home')));
 
     // ----- 폰 오프라인: 다시 열어도 마지막 내용 + 경고 -----
     // 개발자 도구의 오프라인 흉내는 페이지(앱 파일)에만 걸리고 GitHub 요청에는 안 걸려서, 가짜 GitHub도 함께 끊는다
@@ -290,7 +345,7 @@ async function syncFlow() {
     await phone.offline(true);
     await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'on' });
     await phone.goto(`${G}#home`);
-    check('폰 오프라인: 마지막으로 받은 내용이 보임', (await phone.eval(text('#view-home .hero'))) === '62,400원');
+    check('폰 오프라인: 마지막으로 받은 내용이 보임', (await phone.eval(text('#monthTotal'))) === '67,400원' && (await phone.eval(text('#balanceHero'))) === '125,000원', await phone.eval(text('#view-home')));
     check('폰 오프라인: "받아오지 못함" 경고', await phone.waitFor(`${text('#syncbar')}.includes('받아오지 못함')`), await phone.eval(text('#syncbar')));
     await phone.shot('10-phone-offline');
     await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'off' });
@@ -299,6 +354,7 @@ async function syncFlow() {
     // ----- 충돌: 다른 곳에서 바뀐 뒤 PC에서 고치면 묻는다 -----
     const other = { version: 2, subs: [], expenses: [{ id: 'z', date: `${ym}-05`, amount: 777, title: '다른 기기', memo: '' }], settings: { lastBackupAt: null }, updatedAt: new Date().toISOString() };
     await fetch(`${BASE}/__gh/_file`, { method: 'POST', body: JSON.stringify(other) });
+    await pc.tab('spend'); // 다른 탭의 숨은 옛 입력 줄에 쓰지 않게(숨은 칸은 초점을 받지 못해 Enter가 헛돈다)
     await pc.fill('#quickAdd [name="amount"]', '1000');
     await pc.fill('#quickAdd [name="title"]', '커피');
     await pc.pressEnter('#quickAdd [name="title"]');
@@ -307,7 +363,21 @@ async function syncFlow() {
     await pc.click('[data-action="conflict-local"]');
     check('충돌: 이 PC 내용으로 덮어쓰면 저장됨', await saved());
     r = await remote();
-    check('충돌: GitHub 내용 = PC 내용(지출 4건, 다른 기기 내용 없음)', r.expenses.length === 4 && !r.expenses.some((e) => e.amount === 777), JSON.stringify(r.expenses.map((e) => e.amount)));
+    check(
+      '충돌: GitHub 내용 = PC 내용(지출 5건·수입 1건·잔액, 다른 기기 내용 없음)',
+      r.expenses.length === 5 && r.incomes.length === 1 && r.balance && !r.expenses.some((e) => e.amount === 777),
+      JSON.stringify(r.expenses.map((e) => e.amount)),
+    );
+
+    // ----- 더 새 버전 앱이 올린 내용: 폰은 받지 않고 알린다(받으면 모르는 칸이 사라진다) -----
+    // 먼저 폰이 PC 내용을 받아 두게 한다(오프라인이 풀릴 때 폰이 충돌 중간 내용을 받아 갔을 수 있다).
+    // 충돌 점검에서 오늘 날짜로 커피 1,000원을 더 적었으니 잔액은 124,000원
+    await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('폰: 충돌 뒤 PC 내용을 받아 잔액 124,000원', await phone.waitFor(`${text('#balanceHero')} === '124,000원' && document.body.dataset.sync === 'ok'`), await phone.eval(text('#view-home')));
+    await fetch(`${BASE}/__gh/_file`, { method: 'POST', body: JSON.stringify({ ...r, version: 99 }) });
+    await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('새 버전 내용: 폰이 받지 않고 "새 버전" 경고', await phone.waitFor(`${text('#syncbar')}.includes('새 버전')`), await phone.eval(text('#syncbar')));
+    check('새 버전 내용: 폰 화면은 마지막 내용 그대로', (await phone.eval(text('#balanceHero'))) === '124,000원', await phone.eval(text('#view-home')));
 
     // ----- 틀린 토큰 -----
     await phone.click('[data-action="settings"]');

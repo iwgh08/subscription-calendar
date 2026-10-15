@@ -85,6 +85,9 @@ body {
   color: var(--ink);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  /* 한국어는 띄어쓰기에서만 줄을 바꾼다("30,000원"이 "30,000 / 원"으로 갈리지 않게). 너무 긴 낱말만 넘칠 때 자른다 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 body.sheet-open {
   overflow: hidden;
@@ -279,6 +282,15 @@ main {
   letter-spacing: -0.01em;
   margin: 2px 0;
 }
+.stat + .stat-row {
+  margin-top: 6px;
+}
+.label-sub {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
 .stat-row {
   display: flex;
   justify-content: space-between;
@@ -412,9 +424,9 @@ main {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.amt.in {
-  color: var(--muted);
-  font-weight: 500;
+/* 수입 금액: + 부호와 '수입' 표시가 함께 붙는다(색만으로 구분하지 않는다) */
+.amt.plus {
+  color: var(--link);
 }
 .badge {
   display: inline-flex;
@@ -776,6 +788,24 @@ input:not([type="radio"]):not([type="checkbox"]) {
   color: var(--ink);
   box-shadow: 0 0 0 1px var(--ring), 0 1px 2px rgba(0, 0, 0, 0.08);
 }
+.seg label:has(input:focus-visible) {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 15px;
+  color: var(--ink);
+}
+.check input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
 .swatches {
   display: flex;
   flex-wrap: wrap;
@@ -803,18 +833,41 @@ input:not([type="radio"]):not([type="checkbox"]) {
   flex: 1;
   min-width: 0;
 }
-/* 지출 빠른 입력 줄: 폰 폭에서는 두 줄(날짜·금액 / 내용·추가), 넓으면 한 줄 */
+/* 빠른 입력 줄
+   폰 폭: 지출·수입 고르기 / 날짜·금액 / 내용·추가
+   넓으면: 고르기·날짜·금액 / 내용(넓게)·추가 — 칸 순서는 그대로라 Tab 순서와 같다 */
 .quick {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+.quick .seg {
+  grid-column: 1 / -1;
 }
 .quick .btn {
   min-height: 46px;
 }
 @media (min-width: 600px) {
   .quick {
-    grid-template-columns: 10.5em 7.5em 1fr auto;
+    grid-template-columns: auto 10.5em 1fr auto;
+    grid-template-areas:
+      "kind date amount amount"
+      "title title title add";
+  }
+  .quick .seg {
+    grid-area: kind;
+  }
+  .quick [name="date"] {
+    grid-area: date;
+  }
+  .quick [name="amount"] {
+    grid-area: amount;
+  }
+  .quick [name="title"] {
+    grid-area: title;
+  }
+  .quick .btn {
+    grid-area: add;
   }
 }
 details.more summary {

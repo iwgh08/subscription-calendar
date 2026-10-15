@@ -6,7 +6,7 @@
   <!-- 외부 요청은 GitHub API(PC ↔ 폰 연결)만 허용한다. 스크립트는 이 사이트 파일만 -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.github.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>구독달력</title>
-  <meta name="description" content="정기 구독료와 한 달 지출을 보는 개인용 앱">
+  <meta name="description" content="정기 구독료와 한 달 지출, 지금 통장 잔액을 보는 개인용 앱">
   <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -45,7 +45,7 @@
     <section id="view-home" class="view" aria-label="홈"></section>
     <section id="view-calendar" class="view" aria-label="달력" hidden></section>
     <section id="view-subs" class="view" aria-label="구독" hidden></section>
-    <section id="view-spend" class="view" aria-label="지출" hidden></section>
+    <section id="view-spend" class="view" aria-label="내역" hidden></section>
   </main>
 
   <nav class="tabbar" aria-label="화면">
@@ -63,7 +63,7 @@
     </a>
     <a href="#spend" data-tab="spend">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5h12v17l-2.5-1.6L13 20.5l-2.5-1.6L8 20.5 6 19.2z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5" stroke-linecap="round"/></svg>
-      <span>지출</span>
+      <span>내역</span>
     </a>
   </nav>
 

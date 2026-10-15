@@ -1,7 +1,8 @@
 /* 구독달력 핵심 로직 — DOM을 쓰지 않는다(Node 테스트에서 그대로 불러온다).
  * 브라우저: 전역 Core / Node: require('./core.js')
  * 날짜는 모두 'YYYY-MM-DD' 문자열로 다루고, 날짜 계산은 UTC 일수로 해서 시간대 영향을 받지 않게 한다.
- * 한 달 총 지출 = 등록한 구독의 결제일 기준 구독료 + 직접 입력한 지출
+ * 한 달 총 지출 = 등록한 구독의 결제일 기준 구독료 + 직접 입력한 지출(수입은 넣지 않는다)
+ * 지금 통장 잔액 = 사용자가 맞춘 잔액 + 그 뒤의 수입 − 지출 − 구독 결제
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -127,67 +128,135 @@
     return Math.round(sum);
   }
 
-  // ---------- 직접 입력한 지출 ----------
-  // expense: { id, date, amount, title, memo }
-  function expensesInMonth(expenses, y, m) {
+  // ---------- 직접 입력한 지출·수입 ----------
+  // entry(지출·수입 같은 모양): { id, date, amount, title, memo, createdAt? } — createdAt은 적은 시각(ISO). 잔액 계산에 쓴다
+  function entriesInMonth(list, y, m) {
     const prefix = monthKey(y, m);
-    return expenses.filter((e) => e.date.startsWith(prefix)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return list.filter((e) => e.date.startsWith(prefix)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   }
+  const expensesInMonth = entriesInMonth;
+  const sumAmount = (list) => list.reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
   // 그 달 합계: subs = 구독료(결제일 기준, 그 달 전체), other = 직접 입력한 지출, total = 둘의 합
   function monthTotals(subs, expenses, y, m) {
     const list = expensesInMonth(expenses, y, m);
     const s = subscriptionTotal(subs, y, m);
-    const other = list.reduce((a, e) => a + (Number(e.amount) || 0), 0);
+    const other = sumAmount(list);
     return { subs: s, other, total: s + other, count: list.length };
   }
 
-  // ---------- 저장 상태 / 백업 ----------
-  function emptyState() {
-    return { version: 2, subs: [], expenses: [], settings: { lastBackupAt: null }, updatedAt: null };
+  // 그 달 수입 합계(총 지출과는 따로 센다)
+  function monthIncome(incomes, y, m) {
+    const list = entriesInMonth(incomes, y, m);
+    return { amount: sumAmount(list), count: list.length };
   }
 
-  const isEmptyState = (s) => !s || (!(s.subs && s.subs.length) && !(s.expenses && s.expenses.length));
+  // ---------- 통장 잔액 ----------
+  // from~to(둘 다 포함) 사이의 구독 결제
+  function chargesBetween(subs, from, to) {
+    const out = [];
+    if (from > to) return out;
+    const f = parseYmd(from);
+    const t = parseYmd(to);
+    for (let cur = { y: f.y, m: f.m }; cur.y * 12 + cur.m <= t.y * 12 + t.m; cur = addMonths(cur.y, cur.m, 1)) {
+      for (const c of chargesInMonth(subs, cur.y, cur.m)) if (c.date >= from && c.date <= to) out.push(c);
+    }
+    return out;
+  }
+
+  // balance: { amount, date, setAt, paidToday } — date(맞춘 날) setAt(맞춘 시각)에 은행 앱에서 본 잔액
+  // 지금 잔액 = amount + 그 뒤 수입 − 그 뒤 지출 − 그 뒤 구독 결제(오늘까지). 맞춘 적이 없으면 null
+  //  - 맞춘 날보다 앞 날짜의 수입·지출은 이미 잔액에 들어 있다고 본다
+  //  - 맞춘 날 날짜의 수입·지출은 맞춘 뒤에 적은 것(createdAt > setAt)만 넣는다. 적은 시각이 없는 옛 항목은 넣지 않는다
+  //  - 맞춘 날의 구독 결제는 paidToday(그때 이미 빠짐)면 넣지 않는다
+  //  - 앞으로의 날짜는 그날이 되면 넣는다
+  function balanceNow(state, today) {
+    const b = state && state.balance;
+    if (!b) return null;
+    const counts = (e) => e.date <= today && (e.date > b.date || (e.date === b.date && !!e.createdAt && e.createdAt > b.setAt));
+    const ins = (state.incomes || []).filter(counts);
+    const outs = (state.expenses || []).filter(counts);
+    const charges = chargesBetween(state.subs || [], b.paidToday ? addDays(b.date, 1) : b.date, today);
+    const income = sumAmount(ins);
+    const spent = sumAmount(outs);
+    const subs = charges.reduce((a, c) => a + (Number(c.sub.amount) || 0), 0);
+    return {
+      base: b.amount,
+      income,
+      spent,
+      subs,
+      total: b.amount + income - spent - subs,
+      counts: { income: ins.length, spent: outs.length, subs: charges.length },
+    };
+  }
+
+  // ---------- 저장 상태 / 백업 ----------
+  // 저장 형식 버전. 칸을 새로 만들면 올린다(옛 앱은 모르는 칸을 버리므로, 받은 쪽에서 다시 받게 하는 데 쓴다)
+  const STATE_VERSION = 3;
+
+  function emptyState() {
+    return { version: STATE_VERSION, subs: [], expenses: [], incomes: [], balance: null, settings: { lastBackupAt: null }, updatedAt: null };
+  }
+
+  const isEmptyState = (s) =>
+    !s || (!(s.subs && s.subs.length) && !(s.expenses && s.expenses.length) && !(s.incomes && s.incomes.length) && !s.balance);
+
+  // 이 앱보다 새 버전이 저장한 내용인지(그대로 읽으면 모르는 칸이 사라진다)
+  const isNewerState = (s) => !!s && typeof s === 'object' && Number(s.version) > STATE_VERSION;
 
   function cleanSub(x) {
     const { matchKey, ...rest } = x || {}; // v1의 통장 표시 이름은 더 쓰지 않는다
     return rest;
   }
 
-  function cleanExpense(e) {
+  function cleanEntry(e) {
     if (!e || !isYmd(e.date) || !(Number(e.amount) > 0)) return null;
-    return { id: String(e.id), date: e.date, amount: Math.round(Number(e.amount)), title: String(e.title || ''), memo: String(e.memo || '') };
+    const out = { id: String(e.id), date: e.date, amount: Math.round(Number(e.amount)), title: String(e.title || ''), memo: String(e.memo || '') };
+    if (typeof e.createdAt === 'string' && e.createdAt) out.createdAt = e.createdAt;
+    return out;
   }
 
-  // 저장본·백업·GitHub에서 받은 내용을 읽을 때 빠진 칸을 채우고 옛 형식(v1)을 옮긴다.
-  // v1: 직접 입력한 거래만 지출로 옮기고, 불러온 통장 거래는 버린다(구독료가 두 번 계산되므로). 제외 규칙도 버린다.
+  function cleanBalance(b) {
+    if (!b || typeof b !== 'object' || !isYmd(b.date) || b.amount === null || b.amount === '') return null;
+    const amount = Number(b.amount);
+    if (!Number.isFinite(amount) || amount < 0) return null;
+    return { amount: Math.round(amount), date: b.date, setAt: typeof b.setAt === 'string' ? b.setAt : '', paidToday: !!b.paidToday };
+  }
+
+  // 저장본·백업·GitHub에서 받은 내용을 읽을 때 빠진 칸을 채우고 옛 형식을 옮긴다. 여기 없는 칸은 버려진다.
+  // v1: 직접 입력한 거래만 지출·수입으로 옮기고, 불러온 통장 거래는 버린다(구독료가 두 번 계산되므로). 제외 규칙도 버린다.
+  // v2 → v3: 수입(incomes)과 잔액(balance) 칸이 생겼다
   function normalizeState(s) {
     const base = emptyState();
     if (!s || typeof s !== 'object') return base;
     let expenses = [];
-    if (Array.isArray(s.expenses)) expenses = s.expenses.map(cleanExpense).filter(Boolean);
+    let incomes = [];
+    if (Array.isArray(s.expenses)) expenses = s.expenses.map(cleanEntry).filter(Boolean);
     else if (Array.isArray(s.txs)) {
-      expenses = s.txs
-        .filter((t) => t && t.source === 'manual')
-        .map((t) => cleanExpense({ id: t.id, date: t.date, amount: t.out, title: t.desc, memo: t.memo }))
-        .filter(Boolean);
+      const manual = s.txs.filter((t) => t && t.source === 'manual');
+      expenses = manual.map((t) => cleanEntry({ id: t.id, date: t.date, amount: t.out, title: t.desc, memo: t.memo })).filter(Boolean);
+      incomes = manual.map((t) => cleanEntry({ id: t.id, date: t.date, amount: t.in, title: t.desc, memo: t.memo })).filter(Boolean);
     }
+    if (Array.isArray(s.incomes)) incomes = s.incomes.map(cleanEntry).filter(Boolean);
     const st = s.settings && typeof s.settings === 'object' ? s.settings : {};
     return {
-      version: 2,
+      version: STATE_VERSION,
       subs: Array.isArray(s.subs) ? s.subs.filter((x) => x && typeof x === 'object').map(cleanSub) : [],
       expenses,
+      incomes,
+      balance: cleanBalance(s.balance),
       settings: { lastBackupAt: typeof st.lastBackupAt === 'string' ? st.lastBackupAt : null },
       updatedAt: typeof s.updatedAt === 'string' ? s.updatedAt : null,
     };
   }
 
   function makeBackup(state, now) {
-    return { app: 'subcal', version: 2, exportedAt: (now || new Date()).toISOString(), state };
+    return { app: 'subcal', version: STATE_VERSION, exportedAt: (now || new Date()).toISOString(), state };
   }
 
   function readBackup(obj) {
     if (!obj || obj.app !== 'subcal' || !obj.state) throw new Error('구독달력 백업 파일이 아니에요.');
+    if (isNewerState(obj.state)) throw new Error('새 버전 앱에서 만든 백업이에요. 앱을 새 버전으로 바꾼 뒤 불러와 주세요.');
     return normalizeState(obj.state);
   }
 
@@ -196,9 +265,9 @@
     ymd, parseYmd, monthKey, isYmd, daysInMonth, addDays, diffDays, addMonths, weekday, todayStr, calendarWeeks,
     // 구독
     chargeDate, chargesInMonth, subscriptionTotal, monthProgress, upcoming, nextChargeDate, monthlyEquivalent,
-    // 지출
-    expensesInMonth, monthTotals,
+    // 지출·수입·잔액
+    entriesInMonth, expensesInMonth, monthTotals, monthIncome, chargesBetween, balanceNow,
     // 저장
-    emptyState, isEmptyState, normalizeState, makeBackup, readBackup,
+    STATE_VERSION, emptyState, isEmptyState, isNewerState, normalizeState, makeBackup, readBackup,
   };
 });

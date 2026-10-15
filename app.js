@@ -203,6 +203,9 @@
     if (line) line.textContent = syncLine();
   }
 
+  // 다른 기기가 더 새 버전의 앱으로 저장했으면 받지도 올리지도 않는다(받으면 모르는 칸이 사라지고, 올리면 덮어쓴다)
+  const NEWER_TEXT = '새 버전 앱에서 저장한 내용이에요. 이 기기 앱을 껐다 켜서 새 버전으로 바꿔 주세요';
+
   // 열 때·화면으로 돌아올 때·↻를 누를 때: 원격과 비교해서 받아오거나 올린다
   function syncNow() {
     if (!app.sync || DEMO) return Promise.resolve();
@@ -212,6 +215,7 @@
       try {
         const c = client();
         const remote = await c.read();
+        if (remote && C.isNewerState(remote.state)) return setStatus('error', NEWER_TEXT);
         if (!remote) await c.checkRepo(); // 404가 '파일 없음'인지 '저장소·권한 없음'인지 가린다
         const action = S.decideSync({
           role: app.sync.role,
@@ -256,6 +260,7 @@
         const remote = await client()
           .read()
           .catch(() => null);
+        if (remote && C.isNewerState(remote.state)) return setStatus('error', NEWER_TEXT);
         if (remote && remote.sha !== app.sync.sha) {
           setStatus('error', 'GitHub과 이 PC의 내용이 달라요');
           return openConflict(remote);
@@ -279,7 +284,7 @@
 
   function openConflict(remote) {
     const r = C.normalizeState(remote.state);
-    const line = (s) => `구독 ${s.subs.length}개 · 지출 ${s.expenses.length}건 · 수정 ${s.updatedAt ? hm(s.updatedAt) : '-'}`;
+    const line = (s) => `구독 ${s.subs.length}개 · 지출 ${s.expenses.length}건 · 수입 ${s.incomes.length}건 · 수정 ${s.updatedAt ? hm(s.updatedAt) : '-'}`;
     app.conflictRemote = remote;
     openSheet(
       'GitHub과 이 PC의 내용이 달라요',
@@ -314,7 +319,7 @@
       const localEmpty = C.isEmptyState(app.state);
       // 보기 기기에 데이터가 있으면 언제나 먼저 묻는다. PC가 아직 안 올렸어도, PC가 처음 올리는 순간 이 기기 내용이 바뀌기 때문이다
       if (role === 'reader' && !localEmpty) {
-        const mine = `구독 ${app.state.subs.length}개, 지출 ${app.state.expenses.length}건`;
+        const mine = `구독 ${app.state.subs.length}개, 지출 ${app.state.expenses.length}건, 수입 ${app.state.incomes.length}건`;
         const msg = remote
           ? `이 기기에 있는 데이터(${mine})를 PC에서 올린 내용으로 바꿀까요? 이 기기에만 있는 내용은 사라져요.`
           : `PC에서 아직 올린 내용이 없어요. 연결하면 PC가 처음 올릴 때 이 기기의 데이터(${mine})가 그 내용으로 바뀌어요. 먼저 백업 파일을 만들어 PC로 옮기는 게 좋아요. 그래도 연결할까요?`;
@@ -364,9 +369,39 @@
   }
 
   // ----- 홈 -----
+  // 지금 통장 잔액: 고른 달과 상관없이 오늘 기준. 은행과 연결된 값이 아니라 앱이 계산한 값이라고 밝힌다
+  function balanceCard() {
+    const b = C.balanceNow(app.state, app.today);
+    if (!b) {
+      return `<section class="card">
+        <div class="label">지금 통장 잔액</div>
+        ${
+          readOnly()
+            ? '<p class="note">PC에서 통장 잔액을 한 번 적어 두면, 여기에 지금 있는 돈이 계산돼서 보여요.</p>'
+            : `<p class="note">은행 앱에 보이는 잔액을 한 번 적어 두면, 그 뒤에 적는 수입·지출과 구독 결제를 더하고 빼서 지금 있는 돈을 보여 드려요.</p>
+              <button class="btn primary block mt" data-action="balance">잔액 입력하기</button>`
+        }
+      </section>`;
+    }
+    const a = app.state.balance;
+    // "수입 +30,000원"처럼 이름과 금액은 한 줄에 둔다
+    const parts = [b.income ? `수입 +${won(b.income)}` : '', b.spent ? `지출 -${won(b.spent)}` : '', b.subs ? `구독 -${won(b.subs)}` : '']
+      .filter(Boolean)
+      .map((p) => `<span class="nowrap">${p}</span>`);
+    const from = `${a.setAt ? hm(a.setAt) : md(a.date)}에 맞춘 잔액 ${won(b.base)}`;
+    return `<section class="card">
+      <div class="label">지금 통장 잔액 <span class="label-sub">오늘 기준 · 앱 계산</span></div>
+      <div class="hero" id="balanceHero">${won(b.total)}</div>
+      <p class="note">${from}${parts.length ? `에서 ${parts.join(' · ')}` : ' 그대로예요'}</p>
+      ${b.total < 0 ? '<p class="note warn">계산한 잔액이 0원보다 적어요. 빠뜨린 수입이 있는지 보거나 잔액을 다시 맞춰 주세요.</p>' : ''}
+      <p class="note">${readOnly() ? '' : '<button class="link" data-action="balance">잔액 맞추기</button> · '}<button class="link" data-action="help" data-topic="balance">계산 방법</button></p>
+    </section>`;
+  }
+
   function renderHome() {
     const s = app.state;
     const t = C.monthTotals(s.subs, s.expenses, app.y, app.m);
+    const inc = C.monthIncome(s.incomes, app.y, app.m);
     const pr = C.monthProgress(s.subs, app.y, app.m, app.today);
     const up = C.upcoming(s.subs, app.today, 30);
     let subNote;
@@ -377,13 +412,14 @@
     else subNote = `구독 결제 지남 ${pr.past.count}건 · 남은 ${pr.remain.count}건 ${won(pr.remain.amount)}`;
 
     $('#view-home').innerHTML = `
+      ${balanceCard()}
       <section class="card">
         <div class="label">${app.m}월 총 지출</div>
-        <div class="hero">${won(t.total)}</div>
+        <div class="stat" id="monthTotal">${won(t.total)}</div>
         <div class="stat-row"><span><i class="key s1"></i>정기 구독료</span><b>${won(t.subs)}</b></div>
         <div class="stat-row"><span><i class="key s2"></i>그 외 지출</span><b>${won(t.other)}</b></div>
         <p class="note">${subNote}</p>
-        <p class="note">직접 입력한 지출 ${t.count}건${readOnly() ? '' : ' · <button class="link" data-action="go" data-view="spend">지출 입력하기</button>'}</p>
+        <p class="note">직접 적은 지출 ${t.count}건${inc.count ? ` · 수입 ${inc.count}건 +${won(inc.amount)}` : ''}${readOnly() ? '' : ' · <button class="link" data-action="go" data-view="spend">내역 적기</button>'}</p>
       </section>
       <section class="card">
         <h2 class="card-title">다가오는 결제 <small>30일</small></h2>
@@ -568,20 +604,42 @@
       <div class="grow"><div class="name">${esc(c.sub.name)} <span class="badge">정기 구독</span></div></div>
       <span class="amt">-${won(c.sub.amount)}</span>${rowClose()}</li>`;
 
-  const expenseLine = (e) => `<li>${rowOpen('edit-exp', e.id)}
-      <div class="grow"><div class="name">${esc(e.title || '지출')}</div>${e.memo ? `<div class="sub">${esc(e.memo)}</div>` : ''}</div>
-      <span class="amt">-${won(e.amount)}</span>${rowClose()}</li>`;
+  // 직접 적은 지출·수입 한 줄. 수입은 + 금액과 '수입' 표시(색만으로 구분하지 않는다)
+  const entryLine = ({ e, inc }) => `<li>${rowOpen(inc ? 'edit-inc' : 'edit-exp', e.id)}
+      <div class="grow"><div class="name">${esc(e.title || (inc ? '수입' : '지출'))}${inc ? ' <span class="badge">수입</span>' : ''}</div>${e.memo ? `<div class="sub">${esc(e.memo)}</div>` : ''}</div>
+      <span class="amt${inc ? ' plus' : ''}">${inc ? '+' : '-'}${won(e.amount)}</span>${rowClose()}</li>`;
+
+  // 지출·수입 고르기(빠른 입력 줄과 수정 시트)
+  const kindSeg = (inc) => `<div class="seg" role="radiogroup" aria-label="종류">
+      <label><input type="radio" name="kind" value="out"${inc ? '' : ' checked'}>지출</label>
+      <label><input type="radio" name="kind" value="in"${inc ? ' checked' : ''}>수입</label>
+    </div>`;
+
+  // 그 달의 직접 적은 지출·수입. i = 목록 안 순서(적은 시각이 없는 옛 항목을 정렬할 때 쓴다)
+  const entryItems = (y, m) => [
+    ...C.entriesInMonth(app.state.expenses, y, m).map((e, i) => ({ e, inc: false, i })),
+    ...C.entriesInMonth(app.state.incomes, y, m).map((e, i) => ({ e, inc: true, i })),
+  ];
+  // 같은 날에서는 나중에 적은 것이 위로
+  const byRecent = (a, b) => {
+    const x = a.e.createdAt || '';
+    const y = b.e.createdAt || '';
+    return x < y ? 1 : x > y ? -1 : b.i - a.i;
+  };
 
   function openDay(date) {
     const p = C.parseYmd(date);
     const charges = C.chargesInMonth(app.state.subs, p.y, p.m).filter((c) => c.date === date);
-    const expenses = C.expensesInMonth(app.state.expenses, p.y, p.m).filter((e) => e.date === date);
-    const total = sum(charges, (c) => c.sub.amount) + sum(expenses, (e) => e.amount);
+    const entries = entryItems(p.y, p.m)
+      .filter((x) => x.e.date === date)
+      .sort(byRecent);
+    const spent = sum(charges, (c) => c.sub.amount) + sum(entries.filter((x) => !x.inc), (x) => x.e.amount);
+    const income = sum(entries.filter((x) => x.inc), (x) => x.e.amount);
     openSheet(
       longDate(date),
       `<h3>구독 결제</h3>${charges.length ? `<ul class="list">${charges.map(subChargeLine).join('')}</ul>` : '<p class="empty">이날 결제할 구독이 없어요.</p>'}
-      <h3 class="mt">직접 입력한 지출</h3>${expenses.length ? `<ul class="list">${expenses.map(expenseLine).join('')}</ul>` : '<p class="empty">이날 입력한 지출이 없어요.</p>'}
-      <p class="note">이날 합계 ${won(total)}</p>`,
+      <h3 class="mt">직접 적은 지출·수입</h3>${entries.length ? `<ul class="list">${entries.map(entryLine).join('')}</ul>` : '<p class="empty">이날 적은 내역이 없어요.</p>'}
+      <p class="note">이날 지출 ${won(spent)}${income ? ` · 수입 +${won(income)}` : ''}</p>`,
       { kind: 'day', refresh: () => openDay(date) },
     );
   }
@@ -662,7 +720,7 @@
           <label class="field"><span>종료일(해지한 날)</span><input type="date" name="endDate" value="${esc(v.endDate || '')}"></label>
           <label class="field"><span>메모</span><input name="memo" maxlength="80" value="${esc(v.memo || '')}"></label>
         </details>
-        <p class="note">구독료는 결제일에 맞춰 그 달 지출에 자동으로 더해져요. 지출 탭에 따로 입력하지 마세요.</p>
+        <p class="note">구독료는 결제일에 맞춰 그 달 지출에 자동으로 더해져요. 내역 탭에 따로 적지 마세요.</p>
         <div class="actions"><button class="btn primary" type="submit">저장</button>${sub ? '<button type="button" class="btn danger" data-action="sub-delete">삭제</button>' : ''}</div>
       </form>`,
       { kind: 'sub' },
@@ -708,15 +766,16 @@
     commit('구독을 지웠어요.');
   }
 
-  // ----- 지출 -----
+  // ----- 내역(지출·수입) -----
   function renderSpend() {
     const s = app.state;
     const t = C.monthTotals(s.subs, s.expenses, app.y, app.m);
-    // 그 달의 구독 결제(자동)와 직접 입력한 지출을 날짜별로 함께 보여 준다. 같은 날은 구독 먼저, 지출은 최근 입력 먼저
+    const inc = C.monthIncome(s.incomes, app.y, app.m);
+    // 그 달의 구독 결제(자동)와 직접 적은 지출·수입을 날짜별로 함께 보여 준다. 같은 날은 구독 먼저, 나머지는 최근에 적은 것 먼저
     const items = [
       ...C.chargesInMonth(s.subs, app.y, app.m).map((c, i) => ({ date: c.date, kind: 0, i, html: subChargeLine(c) })),
-      ...C.expensesInMonth(s.expenses, app.y, app.m).map((e, i) => ({ date: e.date, kind: 1, i, html: expenseLine(e) })),
-    ].sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : a.kind - b.kind || (a.kind ? b.i - a.i : a.i - b.i)));
+      ...entryItems(app.y, app.m).map((x) => ({ date: x.e.date, kind: 1, x, html: entryLine(x) })),
+    ].sort((a, b) => (a.date > b.date ? -1 : a.date < b.date ? 1 : a.kind - b.kind || (a.kind ? byRecent(a.x, b.x) : a.i - b.i)));
     let list = '';
     let cur = '';
     for (const it of items) {
@@ -734,26 +793,30 @@
       <section class="card">
         <div class="label">${app.m}월 지출</div>
         <div class="stat">${won(t.total)}</div>
-        <p class="note">정기 구독료 ${won(t.subs)} + 직접 입력 ${t.count}건 ${won(t.other)}</p>
+        <p class="note">정기 구독료 ${won(t.subs)} + 직접 적은 지출 ${t.count}건 ${won(t.other)}</p>
+        ${inc.count ? `<p class="note">수입 ${inc.count}건 +${won(inc.amount)}</p>` : ''}
       </section>
       ${
         readOnly()
           ? ''
           : `<section class="card">
         <form id="quickAdd" class="quick" autocomplete="off" novalidate>
+          ${kindSeg(false)}
           <input type="date" name="date" value="${date}" aria-label="날짜">
           <input name="amount" inputmode="numeric" placeholder="금액" aria-label="금액" enterkeyhint="next">
           <input name="title" maxlength="40" placeholder="내용 (예: 점심)" aria-label="내용" enterkeyhint="done">
           <button class="btn primary" type="submit">추가</button>
         </form>
-        <p class="note">Enter로 바로 추가돼요. 구독료는 자동으로 더해지니 여기에는 그 외 지출만 적어 주세요.</p>
+        <p class="note">Enter로 바로 추가돼요. 수입을 하나 넣으면 다시 지출로 돌아와요. 구독료는 자동으로 빠지니 따로 적지 마세요.</p>
       </section>`
       }
-      <section class="card">${items.length ? list : `<p class="empty">${app.m}월 지출이 없어요.</p>`}</section>`;
+      <section class="card">${items.length ? list : `<p class="empty">${app.m}월 내역이 없어요.</p>`}</section>`;
   }
 
+  // 빠른 입력: 다시 그려지면 종류는 '지출'로 돌아온다(수입으로 잘못 들어가는 일이 없게)
   function quickAdd(form) {
     const fd = new FormData(form);
+    const income = fd.get('kind') === 'in';
     const date = String(fd.get('date') || '');
     const amount = digits(fd.get('amount'));
     const title = String(fd.get('title') || '').trim();
@@ -762,23 +825,33 @@
       form.elements.amount.focus();
       return toast('금액을 적어 주세요.');
     }
-    app.state.expenses.push({ id: `e${uid()}`, date, amount, title: title || '지출', memo: '' });
+    const entry = { id: `${income ? 'i' : 'e'}${uid()}`, date, amount, title: title || (income ? '수입' : '지출'), memo: '', createdAt: new Date().toISOString() };
+    (income ? app.state.incomes : app.state.expenses).push(entry);
     app.quickDate = date;
     const p = C.parseYmd(date); // 다른 달 날짜를 골랐으면 그 달을 보여 준다
     app.y = p.y;
     app.m = p.m;
-    commit(`${won(amount)}을 추가했어요.`);
+    commit(`${income ? '수입' : '지출'} ${won(amount)}을 추가했어요.`);
     const f = $('#quickAdd');
     if (f) f.elements.amount.focus();
   }
 
-  function openExpense(id) {
-    if (readOnly()) return;
+  function findEntry(id) {
     const e = app.state.expenses.find((x) => x.id === id);
-    if (!e) return;
+    if (e) return { e, inc: false };
+    const i = app.state.incomes.find((x) => x.id === id);
+    return i ? { e: i, inc: true } : null;
+  }
+
+  function openEntry(id) {
+    if (readOnly()) return;
+    const f = findEntry(id);
+    if (!f) return;
+    const { e, inc } = f;
     openSheet(
-      '지출 수정',
+      inc ? '수입 수정' : '지출 수정',
       `<form id="expForm" class="form" data-id="${esc(e.id)}" autocomplete="off" novalidate>
+        <div class="field"><span>종류</span>${kindSeg(inc)}</div>
         <label class="field"><span>날짜</span><input type="date" name="date" value="${esc(e.date)}"></label>
         <label class="field"><span>금액(원)</span><input name="amount" inputmode="numeric" value="${esc(Number(e.amount).toLocaleString('ko-KR'))}"></label>
         <label class="field"><span>내용</span><input name="title" maxlength="40" value="${esc(e.title)}"></label>
@@ -789,26 +862,87 @@
     );
   }
 
-  function saveExpense(form) {
-    const e = app.state.expenses.find((x) => x.id === form.dataset.id);
-    if (!e) return closeSheet();
+  function saveEntry(form) {
+    const f = findEntry(form.dataset.id);
+    if (!f) return closeSheet();
     const fd = new FormData(form);
+    const income = fd.get('kind') === 'in';
     const date = String(fd.get('date') || '');
     const amount = digits(fd.get('amount'));
     if (!C.isYmd(date)) return toast('날짜를 골라 주세요.');
     if (!amount) return toast('금액을 적어 주세요.');
-    Object.assign(e, { date, amount, title: String(fd.get('title') || '').trim() || '지출', memo: String(fd.get('memo') || '').trim() });
+    let title = String(fd.get('title') || '').trim();
+    if (!title || (income !== f.inc && title === (f.inc ? '수입' : '지출'))) title = income ? '수입' : '지출'; // 기본 이름은 종류를 따라 바꾼다
+    Object.assign(f.e, { date, amount, title, memo: String(fd.get('memo') || '').trim() });
+    if (income !== f.inc) {
+      // 종류를 바꿨으면 다른 목록으로 옮긴다(적은 시각은 그대로)
+      const from = f.inc ? 'incomes' : 'expenses';
+      app.state[from] = app.state[from].filter((x) => x !== f.e);
+      (income ? app.state.incomes : app.state.expenses).push(f.e);
+    }
     closeSheet();
-    commit('지출을 고쳤어요.');
+    commit(`${income ? '수입' : '지출'}을 고쳤어요.`);
   }
 
-  function deleteExpense() {
+  function deleteEntry() {
     const form = $('#expForm');
-    const e = form && app.state.expenses.find((x) => x.id === form.dataset.id);
-    if (!e || !confirm(`'${e.title}' ${won(e.amount)}을 지울까요?`)) return;
-    app.state.expenses = app.state.expenses.filter((x) => x !== e);
+    const f = form && findEntry(form.dataset.id);
+    if (!f || !confirm(`'${f.e.title}' ${won(f.e.amount)}을 지울까요?`)) return;
+    const key = f.inc ? 'incomes' : 'expenses';
+    app.state[key] = app.state[key].filter((x) => x !== f.e);
     closeSheet();
-    commit('지출을 지웠어요.');
+    commit(`${f.inc ? '수입' : '지출'}을 지웠어요.`);
+  }
+
+  // ----- 통장 잔액 맞추기 -----
+  function openBalance() {
+    if (readOnly()) return;
+    const today = C.todayStr();
+    if (today !== app.today) {
+      app.today = today;
+      render();
+    }
+    const now = C.balanceNow(app.state, app.today);
+    const p = C.parseYmd(app.today);
+    const due = C.chargesInMonth(app.state.subs, p.y, p.m).filter((c) => c.date === app.today);
+    openSheet(
+      '통장 잔액 맞추기',
+      `<form id="balForm" class="form" autocomplete="off" novalidate>
+        <p class="note">은행 앱(신한 SOL뱅크)에 보이는 <b>지금 잔액</b>을 적어 주세요. 그 뒤에 적는 수입은 더하고, 지출과 앞으로 결제될 구독료는 빼서 계산해요.</p>
+        <p class="note">오늘 이미 쓰거나 들어온 돈은 <b>먼저 적은 뒤에</b> 잔액을 맞추세요. 맞춘 뒤에 적으면 두 번 계산돼요.</p>
+        ${now ? `<p class="note">지금 앱 계산: <b>${won(now.total)}</b></p>` : ''}
+        <label class="field"><span>지금 잔액(원)</span><input name="amount" inputmode="numeric" placeholder="예: 1,250,000"></label>
+        ${
+          due.length
+            ? `<label class="check"><input type="checkbox" name="paidToday" checked><span>오늘 결제일인 구독(${esc(due.map((c) => `${c.sub.name} ${won(c.sub.amount)}`).join(', '))})이 이미 통장에서 빠졌어요</span></label>
+          <p class="note">아직 안 빠졌으면 체크를 풀어 주세요. 그러면 앱이 오늘 빼서 계산해요.</p>`
+            : ''
+        }
+        <div class="actions"><button class="btn primary" type="submit">저장</button>${app.state.balance ? '<button type="button" class="btn danger" data-action="balance-clear">잔액 계산 끄기</button>' : ''}</div>
+      </form>`,
+      { kind: 'balance' },
+    );
+    $('#balForm').elements.amount.focus();
+  }
+
+  function saveBalance(form) {
+    const fd = new FormData(form);
+    const raw = String(fd.get('amount') || '');
+    if (!/\d/.test(raw)) {
+      form.elements.amount.focus();
+      return toast('지금 잔액을 적어 주세요.'); // 0원도 적을 수 있게 빈칸만 막는다
+    }
+    app.today = C.todayStr();
+    app.state.balance = { amount: digits(raw), date: app.today, setAt: new Date().toISOString(), paidToday: fd.get('paidToday') === 'on' };
+    closeSheet();
+    commit('잔액을 맞췄어요.');
+  }
+
+  function clearBalance() {
+    if (!confirm('잔액 계산을 끌까요? 적어 둔 잔액만 지워지고 수입·지출 내역은 그대로 남아요.')) return;
+    app.state.balance = null;
+    closeSheet();
+    commit('잔액 계산을 껐어요.');
   }
 
   // ----- 설정·백업 -----
@@ -847,7 +981,7 @@
       `${DEMO ? '<p class="note warn">샘플 모드에서는 저장·연결·백업이 되지 않아요.</p>' : ''}
       ${syncHtml}
       <section class="set"><h3>내 데이터</h3>
-        <p class="note">구독 ${s.subs.length}개 · 직접 입력한 지출 ${s.expenses.length}건</p>
+        <p class="note">구독 ${s.subs.length}개 · 지출 ${s.expenses.length}건 · 수입 ${s.incomes.length}건 · 잔액 ${s.balance ? `${md(s.balance.date)}에 맞춤` : '안 맞춤'}</p>
         <p class="note">${readOnly() ? '이 기기는 PC에서 올린 내용을 받아서 보여 줘요.' : '휴대폰을 바꾸거나 브라우저 데이터를 지우면 사라질 수 있으니 가끔 백업 파일을 만들어 두세요.'}</p>
         <div class="actions"><button class="btn primary" data-action="backup">백업 파일 만들기</button>${readOnly() ? '' : '<button class="btn" data-action="restore">백업 불러오기</button>'}</div>
         <p class="note">${s.settings.lastBackupAt ? `마지막 백업: ${backupAgo(s.settings.lastBackupAt)}` : '아직 백업한 적이 없어요.'}</p>
@@ -855,6 +989,7 @@
       <section class="set"><h3>도움말</h3>
         <ul class="list">
           <li><button class="row" data-action="help" data-topic="sync"><span class="grow">PC ↔ 폰 연결 방법</span>›</button></li>
+          <li><button class="row" data-action="help" data-topic="balance"><span class="grow">잔액 계산 방법</span>›</button></li>
           <li><button class="row" data-action="help" data-topic="subs"><span class="grow">구독 입력 요령</span>›</button></li>
           <li><button class="row" data-action="help" data-topic="install"><span class="grow">아이폰 홈 화면에 추가하는 법</span>›</button></li>
         </ul>
@@ -894,7 +1029,7 @@
     try {
       const state = C.readBackup(JSON.parse(await file.text()));
       const where = isWriter() ? ' GitHub에도 이 내용이 올라가요.' : '';
-      if (!confirm(`백업(구독 ${state.subs.length}개, 지출 ${state.expenses.length}건)으로 지금 데이터를 바꿀까요?${where}`)) return;
+      if (!confirm(`백업(구독 ${state.subs.length}개, 지출 ${state.expenses.length}건, 수입 ${state.incomes.length}건)으로 지금 데이터를 바꿀까요?${where}`)) return;
       app.state = state;
       closeSheet();
       commit('백업을 불러왔어요.');
@@ -905,7 +1040,7 @@
 
   function wipeAll() {
     const where = isWriter() ? ' GitHub에 올린 내용도 비워져요.' : '';
-    if (!confirm(`구독과 지출을 모두 지울까요? 되돌릴 수 없어요.${where}`)) return;
+    if (!confirm(`구독·지출·수입과 맞춰 둔 잔액을 모두 지울까요? 되돌릴 수 없어요.${where}`)) return;
     if (!confirm('정말 지울까요? 백업 파일이 없으면 복구할 수 없어요.')) return;
     app.state = C.emptyState();
     closeSheet();
@@ -937,7 +1072,19 @@
         <li><b>금액·결제일 찾기</b>: 네이버페이 → 결제내역·정기결제, 아이폰 설정 → 이름 → 구독</li>
         <li><b>29~31일 결제</b>는 짧은 달에 말일로 표시돼요.</li>
         <li>해지했으면 지우지 말고 <b>종료일</b>을 넣으세요. 지난 달 합계가 그대로 남아요.</li>
-        <li>구독 결제는 지출 탭에 따로 입력하지 마세요. 두 번 더해져요.</li>
+        <li>구독 결제는 내역 탭에 따로 적지 마세요. 두 번 더해져요.</li>
+      </ul>`,
+    ],
+    balance: [
+      '잔액 계산 방법',
+      `<p>은행 앱에서 본 잔액을 한 번 적어 두면, 그 뒤의 수입·지출과 구독 결제를 더하고 빼서 지금 있는 돈을 계산해요. 은행과 연결된 값이 아니라 앱이 계산한 값이에요.</p>
+      <ul class="steps">
+        <li><b>계산</b>: 맞춘 잔액 + 그 뒤 수입 − 그 뒤 지출 − 그 뒤 구독 결제</li>
+        <li>맞춘 날보다 <b>앞 날짜</b>로 적은 수입·지출은 이미 통장에 들어 있다고 보고 계산에 넣지 않아요.</li>
+        <li>맞춘 날 날짜로 적은 것은 <b>맞춘 뒤에 적은 것만</b> 넣어요. 그래서 오늘 이미 쓴 돈은 먼저 적고 나서 잔액을 맞추세요.</li>
+        <li>구독은 결제일이 되면 자동으로 빠져요. 구독 결제는 따로 적지 마세요.</li>
+        <li>앞으로의 날짜로 적은 것은 그날이 되면 계산에 들어가요.</li>
+        <li>은행 앱 잔액과 다르면 PC에서 <b>잔액 맞추기</b>로 다시 적으세요. 맞추기 화면에 앱이 계산한 값도 보여서, 빠뜨린 내역이 있는지 가늠할 수 있어요.</li>
       </ul>`,
     ],
     install: [
@@ -993,8 +1140,11 @@
     'add-sub': () => openSubForm(null),
     'edit-sub': (el) => openSubForm(el.dataset.id),
     'sub-delete': deleteSub,
-    'edit-exp': (el) => openExpense(el.dataset.id),
-    'exp-delete': deleteExpense,
+    'edit-exp': (el) => openEntry(el.dataset.id),
+    'edit-inc': (el) => openEntry(el.dataset.id),
+    'exp-delete': deleteEntry,
+    balance: openBalance,
+    'balance-clear': clearBalance,
     backup: doBackup,
     restore: () => $('#restoreFile').click(),
     wipe: wipeAll,
@@ -1083,6 +1233,8 @@
       if (f) handleRestoreFile(f);
     } else if (t.name === 'cycle' && t.form) {
       t.form.classList.toggle('is-yearly', t.value === 'yearly');
+    } else if (t.name === 'kind' && t.form && t.form.id === 'quickAdd') {
+      t.form.elements.title.placeholder = t.value === 'in' ? '내용 (예: 용돈)' : '내용 (예: 점심)';
     }
   });
 
@@ -1091,8 +1243,9 @@
     if (readOnly()) return;
     const id = e.target.id;
     if (id === 'subForm') saveSubForm(e.target);
-    else if (id === 'expForm') saveExpense(e.target);
+    else if (id === 'expForm') saveEntry(e.target);
     else if (id === 'quickAdd') quickAdd(e.target);
+    else if (id === 'balForm') saveBalance(e.target);
   });
 
   const viewFromHash = () => {
@@ -1172,7 +1325,13 @@
         app.state = C.normalizeState(raw);
         const sync = await DB.get('sync');
         app.sync = sync && sync.repo && sync.token ? sync : null;
-        if (raw && raw.version !== 2) persist(); // 옛 형식(v1)을 옮긴 내용을 저장해 둔다
+        if (raw && raw.version !== C.STATE_VERSION) {
+          // 옛 형식을 옮긴 내용을 저장해 둔다. 옛 앱(배포 전에 열어 둔 창 포함)이 받으면서 모르는 칸(수입·잔액)을
+          // 버렸을 수 있으니, 원격이 그대로여도 한 번 다시 받는다(sha를 지우면 다음 동기화에서 받아온다).
+          // 입력 기기에 안 올린 변경이 있으면 그대로 둔다(지우면 괜히 충돌로 묻게 된다)
+          if (app.sync && (app.sync.role === 'reader' || !app.sync.dirty)) app.sync.sha = null;
+          persist();
+        }
       } catch (e) {
         app.canSave = false;
         setTimeout(() => toast('이 브라우저에서는 데이터를 저장할 수 없어요.'), 300);
