@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <!-- 외부로 나가는 요청을 막는다: 모든 파일은 앱 안에 있다 -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <!-- 외부 요청은 GitHub API(PC ↔ 폰 연결)만 허용한다. 스크립트는 이 사이트 파일만 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.github.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>구독달력</title>
   <meta name="description" content="정기 구독료와 한 달 지출을 보는 개인용 앱">
   <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
@@ -39,6 +39,7 @@
   </header>
 
   <div id="banner" class="banner" hidden></div>
+  <div id="syncbar" class="syncbar" role="status" aria-live="polite" hidden></div>
 
   <main>
     <section id="view-home" class="view" aria-label="홈"></section>
@@ -80,12 +81,10 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <!-- 아이폰 파일 앱에서 .xls가 회색으로 막히지 않도록 확장자와 MIME을 모두 적는다 -->
-  <input type="file" id="importFile" class="visually-hidden" tabindex="-1" aria-hidden="true"
-    accept=".xls,.xlsx,.csv,.txt,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv">
   <input type="file" id="restoreFile" class="visually-hidden" tabindex="-1" aria-hidden="true" accept=".json,application/json">
 
   <script src="core.js"></script>
+  <script src="sync.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
