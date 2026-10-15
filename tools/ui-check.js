@@ -44,6 +44,7 @@ async function launch({ width, height, mobile }) {
   let id = 0;
   const pending = new Map();
   const errors = [];
+  const dialogs = []; // confirm() 문구 기록
   const send = (method, params = {}) =>
     new Promise((res, rej) => {
       const i = ++id;
@@ -57,6 +58,7 @@ async function launch({ width, height, mobile }) {
       pending.delete(msg.id);
       msg.error ? rej(new Error(msg.error.message)) : res(msg.result);
     } else if (msg.method === 'Page.javascriptDialogOpening') {
+      dialogs.push(msg.params.message);
       send('Page.handleJavaScriptDialog', { accept: true }); // confirm()은 '확인'을 누른 것으로
     } else if (msg.method === 'Runtime.exceptionThrown') {
       const d = msg.params.exceptionDetails;
@@ -75,6 +77,7 @@ async function launch({ width, height, mobile }) {
   const b = {
     send,
     errors,
+    dialogs,
     async theme(dark) {
       await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }] });
     },
@@ -94,12 +97,15 @@ async function launch({ width, height, mobile }) {
       }
       return false;
     },
-    // 항상 페이지를 새로 연다(같은 주소#해시로 이동하면 다시 열리지 않으므로 그때는 새로고침). 옛 페이지를 '준비됨'으로 착각하지 않게 표시를 남긴다
+    // 항상 페이지를 새로 연다. 주소가 같고 #해시만 다르면 이동해도 다시 열리지 않으므로, 주소만 바꾼 뒤 새로고침한다.
+    // 옛 페이지를 '준비됨'으로 착각하지 않게 표시(__stale)를 남긴다
     async goto(url) {
       await b.eval('window.__stale = true').catch(() => {});
       const cur = await b.eval('location.href').catch(() => '');
-      if (cur === url) await send('Page.reload', {});
-      else await send('Page.navigate', { url });
+      if (cur.split('#')[0] === url.split('#')[0]) {
+        await b.eval(`history.replaceState(null, '', ${JSON.stringify(url)})`);
+        await send('Page.reload', {});
+      } else await send('Page.navigate', { url });
       const ok = await b.waitFor('!window.__stale && document.body && (document.body.dataset.ready === "1" || !!document.body.dataset.error)', 12000);
       if (!ok) throw new Error(`페이지를 열지 못함: ${url}`);
       await wait(200);
@@ -204,6 +210,23 @@ async function syncFlow() {
   const saved = () => pc.waitFor("document.body.dataset.sync === 'ok' && document.querySelector('#syncbar').innerText.includes('저장됨')", 10000);
   const remote = async () => JSON.parse((await (await fetch(`${BASE}/__gh/_file`)).json()).text);
   try {
+    // ----- 폰에 데이터가 있는데 PC가 아직 안 올렸을 때 연결하면 먼저 묻는다(나중에 조용히 덮어쓰지 않게) -----
+    await phone.theme(false);
+    await phone.goto(`${G}#subs`);
+    await phone.click('[data-action="add-sub"]');
+    await phone.eval("(() => { const f = document.querySelector('#subForm'); f.elements.name.value = '폰에만 있는 구독'; f.elements.amount.value = '9,900'; f.requestSubmit(); })()");
+    await wait(300);
+    await phone.click('[data-action="settings"]');
+    await phone.fill('#syncToken', 'test-ro');
+    await phone.eval("document.querySelector('input[name=\"syncRole\"][value=\"reader\"]').checked = true");
+    await phone.click('[data-action="sync-connect"]');
+    await phone.waitFor("document.body.dataset.sync === 'error'");
+    check('폰(데이터 있음): PC가 올리기 전에 연결하면 먼저 확인을 받음', phone.dialogs.some((d) => d.includes('아직 올린 내용이 없어요')), phone.dialogs.join(' | '));
+    check('폰: "PC에서 아직 올린 내용이 없어요" 안내', (await phone.eval(text('#syncbar'))).includes('아직 올린 내용이 없어요'), await phone.eval(text('#syncbar')));
+    await phone.click('[data-action="settings"]');
+    await phone.click('[data-action="sync-disconnect"]');
+    phone.dialogs.length = 0;
+
     // ----- PC: 입력 기기로 연결(토큰에 공백·줄바꿈을 섞어 붙여 넣어도 된다) -----
     await pc.theme(false);
     await pc.goto(`${G}#home`);
@@ -233,14 +256,14 @@ async function syncFlow() {
     check('가짜 저장소에 토큰이 들어가지 않음', !JSON.stringify(r).includes('test-rw'));
     await pc.shot('8-pc-spend');
 
-    // ----- 폰: 읽기 전용 토큰으로 보기 기기 연결 -----
-    await phone.theme(false);
+    // ----- 폰: 읽기 전용 토큰으로 보기 기기 연결(폰에 남은 데이터가 있으니 바꿀지 묻고, 확인하면 PC 내용으로 바뀐다) -----
     await phone.goto(`${G}#home`);
     await phone.click('[data-action="settings"]');
     await phone.fill('#syncToken', 'test-ro');
     await phone.eval("document.querySelector('input[name=\"syncRole\"][value=\"reader\"]').checked = true");
     await phone.click('[data-action="sync-connect"]');
     check('폰: 보기 기기로 연결해 받아옴', await phone.waitFor(`${text('#view-home .hero')} === '52,400원'`), await phone.eval(text('#view-home .hero')));
+    check('폰: 이 기기 데이터를 바꾸기 전에 확인을 받음', phone.dialogs.some((d) => d.includes('PC에서 올린 내용으로 바꿀까요')), phone.dialogs.join(' | '));
     const bar = await phone.eval(text('#syncbar'));
     check('폰: 상태 줄에 PC 수정 시각과 받아온 시각', bar.includes('PC 수정') && bar.includes('받아옴') && !bar.includes('PC 수정 -'), bar);
     await phone.shot('9-phone-home');

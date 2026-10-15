@@ -312,7 +312,14 @@
       if (!info.private && !confirm('이 저장소는 공개(Public) 저장소예요. 누구나 데이터를 볼 수 있어요. 그래도 연결할까요?')) return;
       const remote = await c.read();
       const localEmpty = C.isEmptyState(app.state);
-      if (role === 'reader' && remote && !localEmpty && !confirm('이 기기에 있는 데이터를 PC에서 올린 내용으로 바꿀까요? 이 기기에만 있는 내용은 사라져요.')) return;
+      // 보기 기기에 데이터가 있으면 언제나 먼저 묻는다. PC가 아직 안 올렸어도, PC가 처음 올리는 순간 이 기기 내용이 바뀌기 때문이다
+      if (role === 'reader' && !localEmpty) {
+        const mine = `구독 ${app.state.subs.length}개, 지출 ${app.state.expenses.length}건`;
+        const msg = remote
+          ? `이 기기에 있는 데이터(${mine})를 PC에서 올린 내용으로 바꿀까요? 이 기기에만 있는 내용은 사라져요.`
+          : `PC에서 아직 올린 내용이 없어요. 연결하면 PC가 처음 올릴 때 이 기기의 데이터(${mine})가 그 내용으로 바뀌어요. 먼저 백업 파일을 만들어 PC로 옮기는 게 좋아요. 그래도 연결할까요?`;
+        if (!confirm(msg)) return;
+      }
       // 데이터가 있는 PC를 처음 연결하면 '안 올린 변경'으로 본다 → 원격 파일이 있으면 덮지 않고 충돌로 묻는다
       app.sync = { repo, token, role, sha: null, dirty: role === 'writer' && !localEmpty, lastSyncAt: null, remoteUpdatedAt: null };
       app.status = null;
