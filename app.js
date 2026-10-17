@@ -10,7 +10,7 @@
   const S = window.Sync;
   const params = new URLSearchParams(location.search);
   const DEMO = params.has('demo'); // 화면 확인용 샘플 데이터(저장하지 않음)
-  const VIEWS = ['home', 'calendar', 'subs', 'spend'];
+  const VIEWS = ['home', 'calendar', 'subs', 'spend', 'plan'];
   const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
   const COLOR_SLOTS = 8; // styles.css의 --cat-0 ~ --cat-7
   const DEFAULT_REPO = 'iwgh08/subscription-data';
@@ -37,6 +37,8 @@
     status: null, // 연결 상태 { kind: 'busy' | 'ok' | 'error', text }
     conflictRemote: null,
     quickDate: null, // 빠른 입력 줄에서 마지막으로 쓴 날짜
+    planDate: null, // 계산 탭에서 고른 날짜
+    plans: [], // 계산 탭의 써 볼 지출 [{ id, date, amount, title }] — 저장하지 않는다
     canSave: !DEMO,
   };
 
@@ -365,7 +367,7 @@
       else a.removeAttribute('aria-current');
     });
     renderSyncbar();
-    ({ home: renderHome, calendar: renderCalendar, subs: renderSubs, spend: renderSpend })[app.view]();
+    ({ home: renderHome, calendar: renderCalendar, subs: renderSubs, spend: renderSpend, plan: renderPlan })[app.view]();
   }
 
   // ----- 홈 -----
@@ -1099,6 +1101,134 @@
     ],
   };
 
+  // ----- 계산: 앞으로의 날짜를 누르면 그날 끝에 남는 돈 -----
+  // 써 볼 지출(app.plans)은 메모리에만 두고 저장·연결하지 않는다. 데이터를 바꾸지 않으니 보기 기기에서도 쓸 수 있다
+  const signedCell = (v) => `${v < 0 ? '-' : ''}${cellAmount(Math.abs(v))}`;
+  const PLAN_KIND = { sub: ['정기 구독', '-'], in: ['수입', '+'], out: ['지출', '-'], plan: ['써 볼 지출', '-'] };
+
+  function renderPlan() {
+    const s = app.state;
+    if (!app.planDate || app.planDate < app.today) app.planDate = app.today;
+    app.plans = app.plans.filter((p) => p.date >= app.today);
+    if (!s.balance) {
+      $('#view-plan').innerHTML = `<section class="card">
+        <div class="label">그날 남는 돈</div>
+        ${
+          readOnly()
+            ? '<p class="note">PC에서 통장 잔액을 한 번 적어 두면, 날짜를 눌러 그날 남는 돈을 볼 수 있어요.</p>'
+            : `<p class="note">지금 통장 잔액을 먼저 적어 주세요. 그 잔액에서 앞으로의 구독 결제와 적어 둔 수입·지출을 더하고 빼서 그날 남는 돈을 계산해요.</p>
+              <button class="btn primary block mt" data-action="balance">잔액 입력하기</button>`
+        }
+      </section>`;
+      return;
+    }
+    const r = C.balanceOn(s, app.today, app.planDate, app.plans);
+    const parts = [
+      r.subs ? `구독 -${won(r.subs)}` : '',
+      r.spent ? `지출 -${won(r.spent)}` : '',
+      r.income ? `수입 +${won(r.income)}` : '',
+      r.planned ? `써 볼 지출 -${won(r.planned)}` : '',
+    ]
+      .filter(Boolean)
+      .map((p) => `<span class="nowrap">${p}</span>`);
+    const itemRow = (x) => {
+      const [badge, sign] = PLAN_KIND[x.kind];
+      return `<li><div class="row"><div class="grow"><div class="name">${esc(x.title || badge)} <span class="badge">${badge}</span></div><div class="sub">${mdw(x.date)}</div></div>
+        <span class="amt${sign === '+' ? ' plus' : ''}">${sign}${won(x.amount)}</span></div></li>`;
+    };
+    const isToday = app.planDate === app.today;
+
+    const planDays = new Set(app.plans.map((p) => p.date));
+    let cells = '';
+    for (const week of C.calendarWeeks(app.y, app.m)) {
+      week.forEach((date, i) => {
+        if (!date) {
+          cells += '<div class="cal-cell" aria-hidden="true"></div>';
+          return;
+        }
+        const num = `<span class="num">${Number(date.slice(8))}</span>`;
+        const day = i === 0 ? 'sun' : i === 6 ? 'sat' : '';
+        if (date < app.today) {
+          cells += `<div class="${['cal-cell', 'past', day].filter(Boolean).join(' ')}" aria-hidden="true">${num}</div>`;
+          return;
+        }
+        const left = C.balanceOn(s, app.today, date, app.plans).total;
+        const cls = ['cal-cell', day, date === app.today ? 'today' : '', date === app.planDate ? 'selected' : '', planDays.has(date) ? 'has' : ''].filter(Boolean).join(' ');
+        const label = `${longDate(date)}, 남는 돈 ${won(left)}${planDays.has(date) ? ', 써 볼 지출 있음' : ''}`;
+        cells += `<button class="${cls}" data-action="plan-day" data-date="${date}" aria-label="${esc(label)}"${date === app.planDate ? ' aria-pressed="true"' : ''}>${num}<span class="amt${left < 0 ? ' neg' : ''}">${signedCell(left)}</span></button>`;
+      });
+    }
+
+    const plans = app.plans.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const planRow = (p) => `<li><div class="row">
+        <div class="grow"><div class="name">${esc(p.title || '써 볼 지출')}</div><div class="sub">${mdw(p.date)}${
+          readOnly() ? '' : ` · <button class="link" data-action="plan-commit" data-id="${esc(p.id)}">지출로 적기</button>`
+        } · <button class="link" data-action="plan-remove" data-id="${esc(p.id)}">빼기</button></div></div>
+        <span class="amt">-${won(p.amount)}</span></div></li>`;
+
+    $('#view-plan').innerHTML = `
+      <section class="card">
+        <div class="label">${isToday ? '오늘' : longDate(app.planDate)} 끝에 남는 돈 <span class="label-sub">앱 계산</span></div>
+        <div class="hero" id="planResult">${won(r.total)}</div>
+        <p class="note">지금 잔액 ${won(r.now)}${parts.length ? `에서 ${parts.join(' · ')}` : isToday ? '' : ' 그대로예요'}</p>
+        ${r.total < 0 ? '<p class="note warn">이날 통장 잔액이 모자라요.</p>' : ''}
+        ${
+          r.items.length
+            ? `<details class="plan-items mt"><summary>${isToday ? '오늘' : '그사이'} 들어오고 나가는 돈 ${r.items.length}건</summary><ul class="list">${r.items.map(itemRow).join('')}</ul></details>`
+            : ''
+        }
+      </section>
+      <section class="card tight">
+        <div class="cal-week" aria-hidden="true">${WEEK.map((w, i) => `<span class="${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</span>`).join('')}</div>
+        <div class="cal-grid">${cells}</div>
+        <p class="note">날짜를 누르면 그날 끝에 남는 돈을 보여 줘요. 칸 아래 숫자가 그날 남는 돈이에요.</p>
+      </section>
+      <section class="card">
+        <h2 class="card-title">써 볼 지출 <small>저장 안 됨</small></h2>
+        <form id="planAdd" class="plan-add" autocomplete="off" novalidate>
+          <input type="date" name="date" value="${app.planDate}" min="${app.today}" aria-label="날짜">
+          <input name="amount" inputmode="numeric" placeholder="금액" aria-label="금액" enterkeyhint="next">
+          <input name="title" maxlength="40" placeholder="내용 (예: 여행)" aria-label="내용" enterkeyhint="done">
+          <button class="btn primary" type="submit">더하기</button>
+        </form>
+        ${plans.length ? `<ul class="list mt">${plans.map(planRow).join('')}</ul>` : ''}
+        <p class="note">여기 더한 지출은 계산에만 쓰고 저장하지 않아요(앱을 닫으면 사라져요).${readOnly() ? '' : ' 실제로 쓸 거면 "지출로 적기"를 눌러 내역에 넣으세요.'}</p>
+      </section>`;
+  }
+
+  function addPlan(form) {
+    const fd = new FormData(form);
+    const date = String(fd.get('date') || '');
+    const amount = digits(fd.get('amount'));
+    const title = String(fd.get('title') || '').trim();
+    if (!C.isYmd(date) || date < app.today) return toast('오늘이나 앞으로의 날짜를 골라 주세요.');
+    if (!amount) {
+      form.elements.amount.focus();
+      return toast('금액을 적어 주세요.');
+    }
+    app.plans.push({ id: `p${uid()}`, date, amount, title });
+    // 고른 날보다 뒤에 더했으면 그날까지 보이게 고른 날을 옮긴다
+    if (date > app.planDate) {
+      app.planDate = date;
+      const p = C.parseYmd(date);
+      app.y = p.y;
+      app.m = p.m;
+    }
+    render();
+    const f = $('#planAdd');
+    if (f) f.elements.amount.focus();
+  }
+
+  function commitPlan(id) {
+    if (readOnly()) return;
+    const i = app.plans.findIndex((p) => p.id === id);
+    if (i < 0) return;
+    const p = app.plans[i];
+    app.plans.splice(i, 1);
+    app.state.expenses.push({ id: `e${uid()}`, date: p.date, amount: p.amount, title: p.title || '지출', memo: '', createdAt: new Date().toISOString() });
+    commit(`${md(p.date)} 지출 ${won(p.amount)}을 내역에 적었어요.`);
+  }
+
   // ---------- 시트 ----------
   function openSheet(title, html, ctx) {
     app.sheet = ctx || {};
@@ -1137,6 +1267,15 @@
     settings: openSettings,
     go: (el) => (location.hash = el.dataset.view),
     day: (el) => openDay(el.dataset.date),
+    'plan-day': (el) => {
+      app.planDate = el.dataset.date;
+      render();
+    },
+    'plan-remove': (el) => {
+      app.plans = app.plans.filter((p) => p.id !== el.dataset.id);
+      render();
+    },
+    'plan-commit': (el) => commitPlan(el.dataset.id),
     'add-sub': () => openSubForm(null),
     'edit-sub': (el) => openSubForm(el.dataset.id),
     'sub-delete': deleteSub,
@@ -1240,8 +1379,9 @@
 
   document.addEventListener('submit', (e) => {
     e.preventDefault();
-    if (readOnly()) return;
     const id = e.target.id;
+    if (id === 'planAdd') return addPlan(e.target); // 저장하지 않으니 보기 기기에서도 된다
+    if (readOnly()) return;
     if (id === 'subForm') saveSubForm(e.target);
     else if (id === 'expForm') saveEntry(e.target);
     else if (id === 'quickAdd') quickAdd(e.target);

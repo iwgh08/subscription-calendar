@@ -27,7 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     - 테스트 도우미: `POST /__gh/_reset`, `GET·POST /__gh/_file`, `POST /__gh/_down`(on/off — 연결 끊김 흉내)
 - `node tools/ui-check.js <폴더>`: `npm start`를 켠 상태에서 헤드리스 Edge를 DevTools 프로토콜로 조종한다(PASS/FAIL 출력).
   - 샘플 화면: 390×844 모바일 에뮬레이션, 다크 모드
-  - PC(1024px)와 폰(390px) 브라우저 두 개로: 연결 → 빠른 입력(Enter) → 폰이 받아옴 → 화면 복귀 시 갱신 → 잔액 맞추기·수입 → 옛 형식 저장본 다시 받기 → 오프라인 → 충돌 → 새 버전 내용 거부 → 틀린 토큰
+  - PC(1024px)와 폰(390px) 브라우저 두 개로: 연결 → 빠른 입력(Enter) → 폰이 받아옴 → 화면 복귀 시 갱신 → 잔액 맞추기·수입 → 옛 형식 저장본 다시 받기 → 오프라인 → 충돌 → 계산 탭(내일 남는 돈·써 볼 지출·지출로 적기) → 새 버전 내용 거부 → 틀린 토큰
   - 화면이나 동기화를 바꾸면 돌린다.
   - `BASE_URL=https://iwgh08.github.io/subscription-calendar`를 주면 배포된 사이트의 샘플 화면만 점검한다.
 - `node tools/shot.js "/?demo=1#calendar" out.png [폭] [높이] [light|dark]`: 화면 한 장 캡처. 헤드리스 Edge는 창 폭이 약 500px 아래로 줄지 않아서 iframe에 넣어 찍는다.
@@ -53,6 +53,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - 맞춘 날보다 뒤이고 오늘까지인 수입·지출. 앞 날짜는 이미 잔액에 들어 있다고 보고, 앞으로의 날짜는 그날 넣는다.
   - 맞춘 날 날짜의 수입·지출은 맞춘 뒤에 적은 것(`createdAt > balance.setAt`)만 넣는다. 적은 시각이 없는 옛 항목은 넣지 않는다.
   - 구독 결제는 `chargesBetween`으로 맞춘 날 다음 날~오늘을 센다. 맞춘 날의 결제는 `paidToday`(그때 이미 빠짐)가 아닐 때만 넣는다. 잔액 맞추기 시트는 그날 결제할 구독이 있을 때만 이 체크(기본: 빠짐)를 보여 준다.
+- `balanceOn(state, today, date, plans)`: 앞으로의 날짜 끝에 남는 돈 = `balanceNow(오늘)` + 오늘 다음 날~그날의 수입 − 지출 − 구독 결제 − 써 볼 지출(plans, 오늘~그날). plans 없이 계산하면 `balanceNow(state, date)`와 같다. 지난 날짜·잔액 없음이면 null.
 - `normalizeState`: 저장본·백업·GitHub에서 받은 내용을 읽을 때 모두 거친다. **여기서 고르지 않는 칸은 버려진다.** 칸을 새로 만들면 여기, `emptyState`, `isEmptyState`에 넣고 `STATE_VERSION`을 올린다.
   - v1(통장 불러오기 시절): 직접 입력한 거래(`source: 'manual'`)만 `expenses`·`incomes`로 옮긴다. 불러온 통장 거래, 제외 규칙, `payKey`, `matchKey`는 버린다(구독료가 두 번 계산되기 때문이다).
   - v2 → v3: `incomes: []`, `balance: null`을 채운다.
@@ -87,6 +88,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 내역 탭(주소는 `#spend` 그대로): 구독 결제(자동)·지출·수입을 날짜별로 보여 준다. 같은 날은 최근에 적은 것(`createdAt`)이 위다.
   - 빠른 입력 줄의 지출·수입 고르기는 다시 그려질 때 '지출'로 돌아온다. 수입으로 잘못 들어가지 않게 하기 위해서다.
   - 수정 시트(`#expForm`)에서 종류를 바꾸면 다른 목록으로 옮긴다.
+- 계산 탭(`#plan`): 달력에서 오늘 이후 날짜를 누르면 그날 끝에 남는 돈(`#planResult`)을 보여 준다.
+  - 써 볼 지출(`app.plans`)은 메모리에만 두고 저장·연결하지 않는다. 그래서 보기 기기에서도 더할 수 있다(`#planAdd`는 submit의 읽기 전용 검사보다 먼저 처리).
+  - 입력 기기에서만 줄마다 "지출로 적기"(`plan-commit`)로 실제 지출에 넣는다.
 - 사용자·GitHub에서 온 글자는 반드시 `esc()`를 거친다. 클릭은 `data-action` 속성과 `ACTIONS` 표로 처리한다.
 - `?demo=1`은 `demo.js`의 가짜 데이터를 메모리에만 올린다(저장·연결 안 함).
 - `?gh=`는 주소가 localhost·127.0.0.1이고 값이 `/`로 시작할 때만 받는다(개발용 가짜 GitHub).

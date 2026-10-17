@@ -162,7 +162,7 @@ async function demoScreens() {
     await b.theme(false);
     await b.goto(`${BASE}/?demo=1#home`);
     check('샘플: 시작 오류 없음', (await b.eval('document.body.dataset.ready')) === '1', await b.eval('document.body.dataset.error || ""'));
-    for (const v of ['home', 'calendar', 'subs', 'spend']) {
+    for (const v of ['home', 'calendar', 'subs', 'spend', 'plan']) {
       await b.tab(v);
       check(`샘플: ${v} 탭 가로 넘침 없음`, await b.eval(noOverflow));
       await b.shot(`1-${v}`);
@@ -203,6 +203,11 @@ async function demoScreens() {
     await b.shot('7-home-dark');
     await b.tab('spend');
     await b.shot('7-spend-dark');
+    await b.tab('plan');
+    check('샘플 계산: 오늘 남는 돈 = 지금 잔액', /^-?[\d,]+원$/.test(await b.eval(text('#planResult'))), await b.eval(text('#planResult')));
+    await b.click('[data-action="plan-day"]:last-of-type');
+    check('샘플 계산: 날짜를 누르면 그 날짜가 골라짐', await b.eval("document.querySelectorAll('.cal-cell.selected').length === 1 && !document.querySelector('.cal-cell.today.selected')"));
+    await b.shot('7-plan-dark');
     check('샘플: 콘솔 오류 없음', b.errors.length === 0, b.errors.slice(0, 3).join(' | '));
   } finally {
     await b.close();
@@ -374,6 +379,45 @@ async function syncFlow() {
     // 충돌 점검에서 오늘 날짜로 커피 1,000원을 더 적었으니 잔액은 124,000원
     await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
     check('폰: 충돌 뒤 PC 내용을 받아 잔액 124,000원', await phone.waitFor(`${text('#balanceHero')} === '124,000원' && document.body.dataset.sync === 'ok'`), await phone.eval(text('#view-home')));
+    // ----- 계산 탭: 날짜를 누르면 그날 남는 돈. 써 볼 지출은 저장하지 않고, "지출로 적기"를 누른 것만 저장한다 -----
+    // 남은 구독은 매달 3일 14,900원뿐이고, 직접 적은 지출·수입은 모두 오늘까지라 내일 남는 돈은 3일 결제만 빠진다
+    const tm = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const tmr = `${tm.getFullYear()}-${String(tm.getMonth() + 1).padStart(2, '0')}-${String(tm.getDate()).padStart(2, '0')}`;
+    const won = (n) => `${n.toLocaleString('ko-KR')}원`;
+    const tmrLeft = 124000 - (tm.getDate() === 3 ? 14900 : 0);
+    const pickTomorrow = async (b) => {
+      if (!(await b.eval(`!!document.querySelector('[data-action="plan-day"][data-date="${tmr}"]')`))) await b.click('[data-action="next-month"]');
+      await b.click(`[data-action="plan-day"][data-date="${tmr}"]`);
+    };
+    await pc.tab('plan');
+    check('계산: 처음엔 오늘 남는 돈 = 지금 잔액(124,000원)', (await pc.eval(text('#planResult'))) === '124,000원', await pc.eval(text('#view-plan')));
+    await pickTomorrow(pc);
+    check(`계산: 내일을 누르면 그날 남는 돈(${won(tmrLeft)})`, (await pc.eval(text('#planResult'))) === won(tmrLeft), await pc.eval(text('#view-plan .card')));
+    await pc.eval(`(() => { const f = document.querySelector('#planAdd'); f.elements.date.value = '${tmr}'; f.elements.amount.value = '20,000'; f.elements.title.value = '여행'; })()`);
+    await pc.pressEnter('#planAdd [name="title"]');
+    check('계산: 써 볼 지출을 더하면 그만큼 줄어듦', (await pc.eval(text('#planResult'))) === won(tmrLeft - 20000), await pc.eval(text('#view-plan .card')));
+    check('계산: 더한 뒤 금액 칸이 비고 초점이 감', await pc.eval("(() => { const f = document.querySelector('#planAdd'); return f.elements.amount.value === '' && document.activeElement === f.elements.amount; })()"));
+    await wait(1800);
+    check('계산: 써 볼 지출은 저장하지 않음', (await remote()).expenses.length === 5);
+    await pc.shot('8-pc-plan');
+    await pc.click('[data-action="plan-commit"]');
+    check('계산: 지출로 적어도 그날 남는 돈은 그대로', (await pc.eval(text('#planResult'))) === won(tmrLeft - 20000) && !(await pc.eval("!!document.querySelector('[data-action=\"plan-commit\"]')")), await pc.eval(text('#view-plan')));
+    let committed = false;
+    for (let i = 0; i < 40 && !committed; i++, await wait(250)) committed = (await remote()).expenses.some((e) => e.date === tmr && e.amount === 20000 && e.title === '여행');
+    check('계산: "지출로 적기"는 내역에 저장됨', committed);
+    await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    await phone.tab('plan');
+    check('폰 계산: 오늘 남는 돈이 보임(124,000원)', await phone.waitFor(`${text('#planResult')} === '124,000원'`), await phone.eval(text('#view-plan')));
+    await pickTomorrow(phone);
+    check('폰 계산: PC에서 적은 내일 지출이 반영됨', await phone.waitFor(`${text('#planResult')} === '${won(tmrLeft - 20000)}'`), await phone.eval(text('#planResult')));
+    await phone.fill('#planAdd [name="amount"]', '1,000');
+    await phone.pressEnter('#planAdd [name="amount"]');
+    check('폰 계산: 보기 기기도 써 볼 지출을 더할 수 있음', (await phone.eval(text('#planResult'))) === won(tmrLeft - 21000), await phone.eval(text('#planResult')));
+    check('폰 계산: "지출로 적기" 없음', await phone.eval("!document.querySelector('[data-action=\"plan-commit\"]') && !!document.querySelector('[data-action=\"plan-remove\"]')"));
+    check('폰 계산: 가로 넘침 없음', await phone.eval(noOverflow));
+    await phone.shot('9-phone-plan');
+    await phone.tab('home');
+
     await fetch(`${BASE}/__gh/_file`, { method: 'POST', body: JSON.stringify({ ...r, version: 99 }) });
     await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
     check('새 버전 내용: 폰이 받지 않고 "새 버전" 경고', await phone.waitFor(`${text('#syncbar')}.includes('새 버전')`), await phone.eval(text('#syncbar')));

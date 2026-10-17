@@ -190,6 +190,26 @@
     };
   }
 
+  // 앞으로의 날짜(date) 끝에 남는 돈 = 지금 잔액 + 오늘 다음 날~date의 수입 − 같은 기간 지출·구독 결제 − 써 볼 지출(plans, 오늘~date)
+  // plans: [{ date, amount, title }] — 계산 탭에서만 쓰고 저장하지 않는다. 잔액을 맞춘 적이 없거나 date가 오늘 전이면 null
+  function balanceOn(state, today, date, plans) {
+    const now = balanceNow(state, today);
+    if (!now || !isYmd(date) || date < today) return null;
+    const inRange = (e) => e.date > today && e.date <= date;
+    const items = [
+      ...chargesBetween(state.subs || [], addDays(today, 1), date).map((c) => ({ date: c.date, kind: 'sub', title: String(c.sub.name || ''), amount: Number(c.sub.amount) || 0 })),
+      ...(state.incomes || []).filter(inRange).map((e) => ({ date: e.date, kind: 'in', title: e.title, amount: Number(e.amount) || 0 })),
+      ...(state.expenses || []).filter(inRange).map((e) => ({ date: e.date, kind: 'out', title: e.title, amount: Number(e.amount) || 0 })),
+      ...(plans || []).filter((p) => p.date >= today && p.date <= date).map((p) => ({ date: p.date, kind: 'plan', title: String(p.title || ''), amount: Number(p.amount) || 0 })),
+    ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const total = (kind) => items.filter((x) => x.kind === kind).reduce((a, x) => a + x.amount, 0);
+    const income = total('in');
+    const spent = total('out');
+    const subs = total('sub');
+    const planned = total('plan');
+    return { now: now.total, income, spent, subs, planned, total: now.total + income - spent - subs - planned, items };
+  }
+
   // ---------- 저장 상태 / 백업 ----------
   // 저장 형식 버전. 칸을 새로 만들면 올린다(옛 앱은 모르는 칸을 버리므로, 받은 쪽에서 다시 받게 하는 데 쓴다)
   const STATE_VERSION = 3;
@@ -266,7 +286,7 @@
     // 구독
     chargeDate, chargesInMonth, subscriptionTotal, monthProgress, upcoming, nextChargeDate, monthlyEquivalent,
     // 지출·수입·잔액
-    entriesInMonth, expensesInMonth, monthTotals, monthIncome, chargesBetween, balanceNow,
+    entriesInMonth, expensesInMonth, monthTotals, monthIncome, chargesBetween, balanceNow, balanceOn,
     // 저장
     STATE_VERSION, emptyState, isEmptyState, isNewerState, normalizeState, makeBackup, readBackup,
   };

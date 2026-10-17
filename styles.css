@@ -226,7 +226,7 @@ main {
   bottom: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   background: var(--surface);
   box-shadow: 0 -1px 0 var(--ring);
   padding-bottom: var(--safe-b);
@@ -541,6 +541,20 @@ main {
   font-size: 10px;
   font-weight: 600;
   color: var(--ink-2);
+}
+/* 계산 탭 달력: 지난 날은 흐리게, 고른 날은 진하게 */
+.cal-cell.past {
+  opacity: 0.4;
+}
+.cal-cell .amt.neg {
+  color: var(--bad-ink);
+}
+.cal-cell.selected {
+  background: var(--accent);
+}
+.cal-cell.selected .num,
+.cal-cell.selected .amt {
+  color: var(--accent-ink);
 }
 .more {
   font-size: 10px;
@@ -870,12 +884,28 @@ input:not([type="radio"]):not([type="checkbox"]) {
     grid-area: add;
   }
 }
-details.more summary {
+/* 계산 탭의 써 볼 지출 입력: 폰 폭은 날짜·금액 / 내용·더하기, 넓으면 한 줄 */
+.plan-add {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.plan-add .btn {
+  min-height: 46px;
+}
+@media (min-width: 600px) {
+  .plan-add {
+    grid-template-columns: 10.5em 9em 1fr auto;
+  }
+}
+details.more summary,
+details.plan-items summary {
   color: var(--link);
   font-size: 14px;
   cursor: pointer;
 }
-details.more[open] summary {
+details.more[open] summary,
+details.plan-items[open] summary {
   margin-bottom: 10px;
 }
 details.more .field + .field {

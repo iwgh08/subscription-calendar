@@ -142,6 +142,38 @@ test('잔액: 맞춘 날의 구독 결제는 "이미 빠짐"이면 빼지 않고
   assert.equal(Core.balanceNow({ ...state, balance: bal({ paidToday: false }) }, '2026-10-15').total, 86500);
 });
 
+test('그날 남는 돈: 지금 잔액에 앞으로의 수입·지출·구독 결제와 써 볼 지출을 더하고 뺀다', () => {
+  const state = {
+    ...Core.emptyState(),
+    subs: [sub({ id: 'a', name: 'A', amount: 14900, day: 31 }), sub({ id: 'b', name: 'B', amount: 13500, day: 17 })],
+    expenses: [exp({ date: '2026-10-16', amount: 5000 }), exp({ date: '2026-11-02', amount: 7000, title: '병원' })],
+    incomes: [exp({ id: 'i1', date: '2026-11-01', amount: 300000 })],
+    balance: bal(),
+  };
+  const today = '2026-10-17';
+  const now = Core.balanceNow(state, today).total; // 100,000 − 5,000 − 13,500(10/17 결제)
+  assert.equal(now, 81500);
+  // 오늘 그대로: 오늘 결제·지출은 이미 지금 잔액에 들어 있다
+  assert.deepEqual(Core.balanceOn(state, today, today, []).items, []);
+  assert.equal(Core.balanceOn(state, today, today).total, now);
+  // 11/2까지: 10/31 구독 −14,900, 11/1 수입 +300,000, 11/2 지출 −7,000
+  const r = Core.balanceOn(state, today, '2026-11-02', []);
+  assert.equal(r.total, now - 14900 + 300000 - 7000);
+  assert.deepEqual(r.items.map((x) => [x.date, x.kind]), [['2026-10-31', 'sub'], ['2026-11-01', 'in'], ['2026-11-02', 'out']]);
+  // 써 볼 지출 없이 계산하면 그날의 balanceNow와 같다
+  assert.equal(r.total, Core.balanceNow(state, '2026-11-02').total);
+  // 써 볼 지출: 오늘~그날만 넣고, 그날 뒤는 넣지 않는다
+  const plans = [{ date: today, amount: 1000, title: '' }, { date: '2026-10-25', amount: 20000, title: '선물' }, { date: '2026-11-03', amount: 50000, title: '' }];
+  const p = Core.balanceOn(state, today, '2026-11-02', plans);
+  assert.equal(p.planned, 21000);
+  assert.equal(p.total, r.total - 21000);
+});
+
+test('그날 남는 돈: 잔액을 맞춘 적이 없거나 지난 날짜면 null', () => {
+  assert.equal(Core.balanceOn(Core.emptyState(), '2026-10-17', '2026-10-20', []), null);
+  assert.equal(Core.balanceOn({ ...Core.emptyState(), balance: bal() }, '2026-10-17', '2026-10-16', []), null);
+});
+
 test('잔액: 맞춘 적이 없으면 null, 오늘이 맞춘 날보다 앞이면 맞춘 값 그대로', () => {
   assert.equal(Core.balanceNow(Core.emptyState(), '2026-10-15'), null);
   const state = {
