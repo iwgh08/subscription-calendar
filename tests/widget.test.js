@@ -23,7 +23,7 @@ const contentOf = (state) => {
 };
 
 // 가짜 Scriptable. reply: { status, body } 또는 'offline'. alerts: presentAlert가 돌려줄 [고른 번호, 입력값]
-async function runWidget({ token = 'tok', reply, cache = null, runsInApp = false, alerts = [] } = {}) {
+async function runWidget({ token = 'tok', reply, cache = null, runsInApp = false, alerts = [], family = 'medium' } = {}) {
   const texts = [];
   const keychain = new Map(token ? [['subcal-widget-token', token]] : []);
   const files = new Map(cache ? [['/docs/subcal-widget-cache.json', JSON.stringify(cache)]] : []);
@@ -114,7 +114,7 @@ async function runWidget({ token = 'tok', reply, cache = null, runsInApp = false
       setWidget: (w) => (widget = w),
       complete() {},
     },
-    config: { runsInWidget: !runsInApp, runsInApp, widgetFamily: 'medium' },
+    config: { runsInWidget: !runsInApp, runsInApp, widgetFamily: family },
     module: { exports: {} }, // Scriptable에도 module 전역이 있다
   };
   await vm.runInNewContext(`(async () => {\n${code}\n})()`, sandbox);
@@ -138,6 +138,11 @@ test('위젯: 받아오면 잔액·이번 달 총 지출·오늘 일정·받은 
   assert.equal(r.requests[0].headers.Authorization, 'Bearer tok');
   assert.equal(JSON.parse(r.files.get('/docs/subcal-widget-cache.json')).state.balance.amount, 123456);
   assert.equal(r.widget.url, 'https://iwgh08.github.io/subscription-calendar/');
+});
+
+test('위젯: 잠금 화면(accessory)에서는 잔액 한 줄만', async () => {
+  const r = await runWidget({ family: 'accessoryRectangular', reply: { status: 200, body: { content: contentOf(sampleState()) } } });
+  assert.equal(r.all, '잔액 123,456원');
 });
 
 test('위젯: 받지 못하면(401·오프라인) 마지막 내용과 경고', async () => {

@@ -121,6 +121,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Scriptable에도 `module` 전역이 있어서, core.js는 따로 만든 `module`로 감싸 넣는다.
 - 위젯은 GitHub contents API로 `state.json`을 받는다. 받으면 `FileManager.local()`에 캐시하고, 받지 못하면 캐시와 함께 "⚠ 받아오지 못함"을 보여 준다. `isNewerState`이면 받지 않고 "새로 복사해 주세요"를 띄운다.
   - **실행 중에 다른 곳의 코드를 받아 돌리지 않는다**(토큰을 가진 채 공개 저장소의 바뀐 코드가 돌지 않게).
+  - 그래서 폰에 붙여 넣은 위젯은 스스로 바뀌지 않는다. 위젯이 "새로 복사해 주세요"를 띄우는 건 `STATE_VERSION`이 오를 때뿐이다. **`core.js`의 계산 규칙(잔액·합계·다가오는 결제)을 바꾸면 배포 안내에 "위젯 스크립트 복사를 다시 눌러 붙여 넣기"를 넣는다.**
+  - 잠금 화면(`accessory…`) 위젯은 잔액 한 줄만 그린다.
 - 앱 도움말의 "위젯 스크립트 복사"(`copy-widget`)는 `widget/subcal-widget.js`를 받아 클립보드에 넣는다. 아이폰은 누른 순간 복사를 시작해야 해서 Promise를 넘기는 `ClipboardItem`을 쓴다. 위젯 파일은 앱이 쓰지 않으므로 `sw.js`의 `ASSETS`에 넣지 않는다.
 
 **`sw.js` — 서비스 워커.**

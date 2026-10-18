@@ -541,6 +541,12 @@ function buildWidget(view) {
   }
 
   const s = view.summary;
+  // 잠금 화면 위젯(accessory…)은 작아서 잔액 한 줄만
+  if (family.startsWith('accessory')) {
+    addLine(w, s.balance === null ? '잔액 안 맞춤' : `잔액 ${won(s.balance)}`, Font.semiboldSystemFont(13), COLORS.ink, { scale: 0.6 });
+    if (view.error) addLine(w, '⚠ 받아오지 못함', Font.systemFont(10), COLORS.bad);
+    return w;
+  }
   addLine(w, '지금 통장 잔액', Font.mediumSystemFont(12), COLORS.ink2);
   if (s.balance === null) addLine(w, '잔액 안 맞춤', Font.semiboldSystemFont(18), COLORS.muted, { scale: 0.6 });
   else addLine(w, won(s.balance), Font.boldSystemFont(family === 'small' ? 22 : 26), s.balance < 0 ? COLORS.bad : COLORS.ink, { scale: 0.5 });
