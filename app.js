@@ -454,6 +454,7 @@
         <h2 class="card-title">다가오는 결제 <small>30일</small></h2>
         ${up.length ? `<ul class="list">${up.map(upcomingRow).join('')}</ul>` : '<p class="empty">30일 안에 결제할 구독이 없어요.</p>'}
       </section>
+      ${upcomingEventsCard()}
       <section class="card">
         <h2 class="card-title">최근 6개월 지출</h2>
         <div class="legend"><span><i class="key s1"></i>정기 구독료</span><span><i class="key s2"></i>그 외 지출</span></div>
@@ -461,6 +462,19 @@
         ${chartTable()}
       </section>`;
     drawChart();
+  }
+
+  // 7일 안의 일정(오늘 포함). 적어 둔 일정이 하나도 없으면 카드를 그리지 않는다
+  function upcomingEventsCard() {
+    if (!app.state.events.length) return '';
+    const list = C.upcomingEvents(app.state.events, app.today, 7);
+    const row = (e) => `<li>${rowOpen('edit-event', e.id)}<i class="ev-mark"></i>
+      <div class="grow"><div class="name">${esc(e.title)}${e.repeat === 'yearly' ? ' <span class="badge">매년</span>' : ''}</div><div class="sub">${[mdw(e.date), e.time].filter(Boolean).join(' · ')}</div></div>
+      <span class="dday${e.dday <= 1 ? ' soon' : ''}">${ddayText(e.dday)}</span>${rowClose()}</li>`;
+    return `<section class="card" id="upcomingEvents">
+        <h2 class="card-title">다가오는 일정 <small>7일</small></h2>
+        ${list.length ? `<ul class="list">${list.map(row).join('')}</ul>` : '<p class="empty">7일 안에 일정이 없어요.</p>'}
+      </section>`;
   }
 
   const upcomingRow = (c) => `
@@ -1108,6 +1122,7 @@
           <li><button class="row" data-action="help" data-topic="balance"><span class="grow">잔액 계산 방법</span>›</button></li>
           <li><button class="row" data-action="help" data-topic="subs"><span class="grow">구독 입력 요령</span>›</button></li>
           <li><button class="row" data-action="help" data-topic="install"><span class="grow">아이폰 홈 화면에 추가하는 법</span>›</button></li>
+          <li><button class="row" data-action="help" data-topic="widget"><span class="grow">아이폰 위젯 만들기</span>›</button></li>
         </ul>
       </section>
       ${readOnly() ? '' : '<section class="set"><button class="btn danger block" data-action="wipe">모든 데이터 지우기</button></section>'}
@@ -1202,6 +1217,21 @@
         <li>앞으로의 날짜로 적은 것은 그날이 되면 계산에 들어가요.</li>
         <li>은행 앱 잔액과 다르면 <b>잔액 맞추기</b>로 다시 적으세요. 맞추기 화면에 앱이 계산한 값도 보여서, 빠뜨린 내역이 있는지 가늠할 수 있어요.</li>
       </ul>`,
+    ],
+    widget: [
+      '아이폰 위젯 만들기',
+      `<p>무료 앱 <b>Scriptable</b>로 홈 화면에 지금 잔액·이번 달 총 지출·7일 안의 결제와 일정을 띄워요. 아이폰은 홈 화면에 추가한 웹 앱에 위젯을 허락하지 않아서 이 방법을 써요.</p>
+      <ol class="steps">
+        <li>App Store에서 <b>Scriptable</b>을 설치합니다.</li>
+        <li>GitHub에서 <b>위젯용 토큰</b>을 새로 만듭니다: Fine-grained tokens → Generate new token → Only select repositories → subscription-data → Contents <b>Read-only</b></li>
+        <li>폰의 구독달력 앱에서 아래 <b>위젯 스크립트 복사</b>를 누릅니다.</li>
+        <li>Scriptable → 오른쪽 위 <b>+</b> → 붙여 넣기 → 맨 위 제목을 <b>구독달력</b>으로 바꾸고 → 완료</li>
+        <li>스크립트를 한 번 눌러 실행하고, 위젯용 토큰을 붙여 넣습니다.</li>
+        <li>홈 화면을 길게 눌러 <b>+</b> → Scriptable 위젯 추가 → 위젯을 길게 눌러 위젯 편집 → Script: <b>구독달력</b></li>
+      </ol>
+      <button class="btn primary block" data-action="copy-widget">위젯 스크립트 복사</button>
+      <p class="note">위젯은 iOS가 정한 때(보통 15분~몇 시간마다)에 새로 받아요. 받지 못하면 마지막 내용과 경고를 보여 줘요. 위젯을 누르면 Safari로 앱 주소가 열려요.</p>
+      <p class="note">토큰은 Scriptable 보관함에만 저장돼요. 앱이 크게 바뀌어 위젯에 "새로 복사해 주세요"가 뜨면 3~4번을 다시 하면 돼요(토큰은 다시 안 넣어도 돼요).</p>`,
     ],
     install: [
       '아이폰 홈 화면에 추가하는 법',
@@ -1359,6 +1389,23 @@
     document.body.classList.remove('sheet-open');
   }
 
+  // 위젯 스크립트를 클립보드에 복사한다. 아이폰 Safari는 누른 순간에 복사를 시작해야 해서, 받기를 기다리는 ClipboardItem을 쓴다
+  async function copyWidget() {
+    const load = () =>
+      fetch('widget/subcal-widget.js', { cache: 'no-store' }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      });
+    try {
+      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': load().then((t) => new Blob([t], { type: 'text/plain' })) })]);
+      } else await navigator.clipboard.writeText(await load());
+      toast('위젯 스크립트를 복사했어요. Scriptable 새 스크립트에 붙여 넣으세요.');
+    } catch (e) {
+      toast('복사하지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요.');
+    }
+  }
+
   // ---------- 이벤트 ----------
   function moveMonth(n) {
     const r = C.addMonths(app.y, app.m, n);
@@ -1432,6 +1479,7 @@
     balance: openBalance,
     'balance-clear': clearBalance,
     backup: doBackup,
+    'copy-widget': copyWidget,
     restore: () => $('#restoreFile').click(),
     wipe: wipeAll,
     help: (el) => {

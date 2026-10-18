@@ -228,6 +228,33 @@
     return { now: now.total, income, spent, subs, planned, total: now.total + income - spent - subs - planned, items };
   }
 
+  // 오늘부터 today + days일까지의 일정(오늘 포함, 매년 일정도 펼친다). dday = 남은 일수
+  function upcomingEvents(events, today, days) {
+    const end = addDays(today, days);
+    const t = parseYmd(today);
+    const e = parseYmd(end);
+    const out = [];
+    for (let cur = { y: t.y, m: t.m }; cur.y * 12 + cur.m <= e.y * 12 + e.m; cur = addMonths(cur.y, cur.m, 1)) {
+      for (const ev of eventsInMonth(events, cur.y, cur.m)) {
+        if (ev.date >= today && ev.date <= end) out.push({ ...ev, dday: diffDays(today, ev.date) });
+      }
+    }
+    return out; // 달 순서대로 모았고 달 안에서는 eventsInMonth가 날짜·시간 순으로 정렬했다
+  }
+
+  // 아이폰 위젯(Scriptable)에 보여 줄 요약: 지금 잔액, 이번 달 총 지출, 7일 안의 결제(내일부터)·일정(오늘부터) 최대 4개
+  function widgetSummary(state, today) {
+    const s = normalizeState(state);
+    const t = parseYmd(today);
+    const totals = monthTotals(s.subs, s.expenses, t.y, t.m);
+    const now = balanceNow(s, today);
+    const items = [
+      ...upcoming(s.subs, today, 7).map((c) => ({ kind: 'sub', date: c.date, dday: c.dday, time: '', title: String(c.sub.name || ''), amount: Number(c.sub.amount) || 0 })),
+      ...upcomingEvents(s.events, today, 7).map((e) => ({ kind: 'event', date: e.date, dday: e.dday, time: e.time, title: e.title })),
+    ].sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.time !== b.time ? (a.time < b.time ? -1 : 1) : 0));
+    return { balance: now ? now.total : null, month: t.m, monthTotal: totals.total, monthSubs: totals.subs, monthOther: totals.other, items: items.slice(0, 4), more: Math.max(0, items.length - 4) };
+  }
+
   // ---------- 저장 상태 / 백업 ----------
   // 저장 형식 버전. 칸을 새로 만들면 올린다(옛 앱은 모르는 칸을 버리므로, 받은 쪽에서 다시 받게 하는 데 쓴다)
   const STATE_VERSION = 5;
@@ -380,7 +407,9 @@
     // 지출·수입·잔액
     entriesInMonth, expensesInMonth, monthTotals, monthIncome, chargesBetween, balanceNow, balanceOn,
     // 일정
-    eventsInMonth,
+    eventsInMonth, upcomingEvents,
+    // 위젯
+    widgetSummary,
     // 두 기기 합치기
     sameData, mergeStates,
     // 저장

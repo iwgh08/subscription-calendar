@@ -392,3 +392,50 @@ test('v4 저장본: 일정의 반복은 없음으로 채운다', () => {
   assert.equal(s.events[0].repeat, '');
   assert.equal(Core.normalizeState({ events: [{ id: 'e', date: '2026-10-20', repeat: 'weekly' }] }).events[0].repeat, '');
 });
+
+// ---------- 다가오는 일정·위젯 요약 ----------
+test('다가오는 일정: 오늘 포함, 달을 넘어도, 매년 일정도 펼친다', () => {
+  const events = [
+    { id: 'a', date: '2026-10-28', time: '', repeat: '', title: '오늘' },
+    { id: 'b', date: '2026-11-02', time: '09:00', repeat: '', title: '다음 달' },
+    { id: 'c', date: '1990-11-01', time: '', repeat: 'yearly', title: '생일' },
+    { id: 'd', date: '2026-11-10', time: '', repeat: '', title: '너무 멀다' },
+    { id: 'e', date: '2026-10-27', time: '', repeat: '', title: '어제' },
+  ];
+  assert.deepEqual(
+    Core.upcomingEvents(events, '2026-10-28', 7).map((e) => [e.title, e.date, e.dday]),
+    [
+      ['오늘', '2026-10-28', 0],
+      ['생일', '2026-11-01', 4],
+      ['다음 달', '2026-11-02', 5],
+    ],
+  );
+});
+
+test('위젯 요약: 잔액·이번 달 총 지출, 결제는 내일부터·일정은 오늘부터 날짜순 4개까지', () => {
+  const state = {
+    ...Core.emptyState(),
+    subs: [sub({ id: 's1', name: '넷플릭스', amount: 13500, day: 18 }), sub({ id: 's2', name: '멜론', amount: 10900, day: 20 })],
+    expenses: [exp({ id: 'x', date: '2026-10-05', amount: 5000 })],
+    events: [
+      { id: 'e1', date: '2026-10-18', time: '15:00', repeat: '', title: '치과' },
+      { id: 'e2', date: '2026-10-19', time: '', repeat: '', title: 'A' },
+      { id: 'e3', date: '2026-10-21', time: '', repeat: '', title: 'B' },
+      { id: 'e4', date: '2026-10-22', time: '', repeat: '', title: 'C' },
+    ],
+  };
+  const w = Core.widgetSummary(state, '2026-10-18');
+  assert.equal(w.balance, null);
+  assert.equal(w.month, 10);
+  assert.equal(w.monthTotal, 13500 + 10900 + 5000);
+  assert.deepEqual(w.items.map((i) => [i.kind, i.title, i.dday]), [
+    ['event', '치과', 0],
+    ['event', 'A', 1],
+    ['sub', '멜론', 2],
+    ['event', 'B', 3],
+  ]);
+  assert.equal(w.items[2].amount, 10900);
+  assert.equal(w.more, 1);
+  const withBal = { ...state, balance: { amount: 100000, date: '2026-10-17', setAt: '', paidToday: true } };
+  assert.equal(Core.widgetSummary(withBal, '2026-10-18').balance, 100000 - 13500); // 오늘 결제는 이미 빠졌다
+});

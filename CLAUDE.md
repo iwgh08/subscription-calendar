@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 명령어
 
-- `npm test`: `tests/*.test.js`를 `node --test`로 돌린다. `core.test.js`는 계산, 옛 형식 옮기기, 두 기기 합치기, `sync.test.js`는 가짜 fetch로 GitHub 요청·오류·`decideSync`를 확인한다.
+- `npm test`: `tests/*.test.js`를 `node --test`로 돌린다. `widget.test.js`는 가짜 Scriptable 전역으로 위젯 파일을 그대로 돌리고, 위젯 파일이 다시 만든 것과 같은지 확인한다. `core.test.js`는 계산, 옛 형식 옮기기, 두 기기 합치기, `sync.test.js`는 가짜 fetch로 GitHub 요청·오류·`decideSync`를 확인한다.
 - `npm start`: http://localhost:8080 개발 서버(`tools/serve.js`, 의존성 없음).
   - 앱 파일 확장자만 내보내고 `.git` 같은 숨김 경로는 막는다.
   - **가짜 GitHub API(`/__gh/...`)가 들어 있다.** 메모리에만 저장하고, 이 개발 서버에만 있다.
@@ -33,6 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `BASE_URL=https://iwgh08.github.io/subscription-calendar`를 주면 배포된 사이트의 샘플 화면만 점검한다.
 - `node tools/shot.js "/?demo=1#calendar" out.png [폭] [높이] [light|dark]`: 화면 한 장 캡처. 헤드리스 Edge는 창 폭이 약 500px 아래로 줄지 않아서 iframe에 넣어 찍는다.
 - `node tools/make-icons.js`: `icons/icon.svg` → PNG 180/192/512
+- `node tools/make-widget.js`: `core.js` + `widget/widget-main.js` → `widget/subcal-widget.js`. **`core.js`나 `widget-main.js`를 바꾸면 꼭 다시 만든다**(안 하면 `npm test`가 실패한다).
 - PowerShell에서 `npm`이 막히면 `npm.cmd`를 쓴다. 캡처·임시 파일은 스크래치패드나 OS 임시 폴더에 둔다.
 
 ### 점검 스크립트를 고칠 때 주의
@@ -64,6 +65,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - 한쪽만 바뀐 항목은 바뀐 쪽을 쓴다(지운 것도 포함). 한쪽은 지우고 다른 쪽은 고쳤으면 고친 것을, 둘 다 고쳤으면 이 기기 것을 남긴다.
   - 잔액도 같은 규칙이고, 둘 다 맞췄으면 `setAt`이 나중인 것을 쓴다. 백업 시각은 나중 것.
   - 값 비교는 칸 순서를 무시한다(`canon`). `sameData`는 수정 시각·설정을 빼고 데이터가 같은지 본다.
+- `upcomingEvents(events, today, days)`: 오늘부터 days일 뒤까지의 일정(매년 일정 포함)에 `dday`를 붙인다. 홈 "다가오는 일정 7일" 카드와 위젯이 쓴다.
+- `widgetSummary(state, today)`: 위젯용 요약 `{ balance, month, monthTotal, monthSubs, monthOther, items(최대 4), more }`. items는 7일 안의 결제(내일부터)와 일정(오늘부터)이다.
 - `isNewerState`: 이 앱보다 새 버전이 저장한 내용이면 받지 않는다(받으면 모르는 칸이 사라진다). 그런 백업도 `readBackup`이 거부한다.
 - `eventsInMonth`: 그 달 일정을 날짜 → 시간 순으로(시간 없는 것이 그날 먼저). 매년 일정은 처음 날짜의 해부터 해마다 같은 월·일에 나오고(2월 29일은 평년에 28일), 돌려줄 때 `date`는 그해 날짜, `start`는 처음 날짜다. 고칠 때는 id로 원래 일정을 찾는다. **일정은 금액이 없고 돈 계산(총 지출·잔액·계산 탭)에 넣지 않는다.**
 - state v5: `{ version: 5, subs, expenses, incomes, events, balance, settings: { lastBackupAt }, updatedAt }`
@@ -97,6 +100,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `body[data-sync]`(off/busy/ok/error)는 점검 스크립트가 본다.
 - 보기 기기(`readOnly()`)는 추가·수정·삭제 버튼, 빠른 입력 줄, 잔액 맞추기, 백업 불러오기, 전체 삭제를 그리지 않는다. 목록 줄도 누를 수 없는 `div`로 그린다.
 - 저장본의 `version`이 옛것이면 옮긴 내용을 저장하고, `sync.sha`를 지워서 한 번 다시 받는다(보기 기기, 그리고 안 올린 변경이 없는 입력 기기). 옛 앱(배포 전에 열어 둔 창 포함)이 받으면서 수입·잔액 칸을 버렸을 수 있는데, 원격 sha가 같으면 다시 받지 않기 때문이다.
+- 홈: "다가오는 결제" 아래에 "다가오는 일정 7일"(`#upcomingEvents`)이 있다. 적어 둔 일정이 하나도 없으면 그리지 않는다.
 - 홈 맨 위는 지금 통장 잔액(`#balanceHero`, 고른 달과 상관없이 오늘 기준)이다. 그 아래가 고른 달의 총 지출(`#monthTotal`)이다. 점검 스크립트가 이 id를 본다.
 - 내역 탭(주소는 `#spend` 그대로): 구독 결제(자동)·지출·수입을 날짜별로 보여 준다. 같은 날은 최근에 적은 것(`createdAt`)이 위다.
   - 빠른 입력 줄의 지출·수입 고르기는 다시 그려질 때 '지출'로 돌아온다. 수입으로 잘못 들어가지 않게 하기 위해서다.
@@ -112,6 +116,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `?gh=`는 주소가 localhost·127.0.0.1이고 값이 `/`로 시작할 때만 받는다(개발용 가짜 GitHub).
 - 연결 설정과 토큰은 IndexedDB의 `sync` 키에 둔다. 백업 파일에는 state만 들어간다.
 
+**`widget/` — 아이폰 위젯(Scriptable 앱용).** PWA는 iOS 위젯을 만들 수 없어서, 사용자가 Scriptable에 붙여 넣어 쓴다.
+- `widget-main.js`(Scriptable API로 그리는 부분)를 고치고, `subcal-widget.js`는 `make-widget.js`로 만든다. 계산은 그 안에 들어간 `Core`를 쓰므로 앱과 같다.
+  - Scriptable에도 `module` 전역이 있어서, core.js는 따로 만든 `module`로 감싸 넣는다.
+- 위젯은 GitHub contents API로 `state.json`을 받는다. 받으면 `FileManager.local()`에 캐시하고, 받지 못하면 캐시와 함께 "⚠ 받아오지 못함"을 보여 준다. `isNewerState`이면 받지 않고 "새로 복사해 주세요"를 띄운다.
+  - **실행 중에 다른 곳의 코드를 받아 돌리지 않는다**(토큰을 가진 채 공개 저장소의 바뀐 코드가 돌지 않게).
+- 앱 도움말의 "위젯 스크립트 복사"(`copy-widget`)는 `widget/subcal-widget.js`를 받아 클립보드에 넣는다. 아이폰은 누른 순간 복사를 시작해야 해서 Promise를 넘기는 `ClipboardItem`을 쓴다. 위젯 파일은 앱이 쓰지 않으므로 `sw.js`의 `ASSETS`에 넣지 않는다.
+
 **`sw.js` — 서비스 워커.**
 - 앱 파일을 미리 캐시하고 캐시를 먼저 쓴다. **앱 파일을 바꿔 배포할 때마다 `CACHE` 버전(`subcal-vN`)을 올린다.** 새 파일을 만들면 `ASSETS`에도 넣는다.
 - 설치할 때 `cache: 'reload'`로 받는다. 그래야 GitHub Pages의 HTTP 캐시에 남은 옛 파일이 새 캐시에 들어가지 않는다.
@@ -123,6 +134,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 보안 규칙
 
+- 위젯 토큰은 Scriptable 보관함(Keychain, `subcal-widget-token`)에만 둔다. 위젯용으로 따로 만든 **읽기 전용** 토큰을 쓰게 안내한다.
 - 토큰은 그 기기의 IndexedDB에만 둔다. 코드, 공개 저장소, 백업 파일에 넣지 않는다. **사용자에게 토큰을 채팅에 붙여 넣게 하지 않는다.**
 - `iwgh08.github.io` 아래의 모든 Pages 사이트는 같은 출처라서 IndexedDB를 서로 읽을 수 있다. **이 계정의 어떤 Pages 사이트에도 외부 스크립트를 넣지 않는다.** CSP는 `script-src 'self'`를 유지한다.
 - 토큰 권한은 최소로 한다: 저장소 하나, Contents만. 폰에서도 고치려면 Read and write(보기만 할 기기는 Read-only). PC용·폰용 토큰을 따로 만들어서, 폰을 잃어버리면 폰용만 지운다.

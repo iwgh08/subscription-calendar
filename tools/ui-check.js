@@ -182,6 +182,17 @@ async function demoScreens() {
     }
     await b.tab('home');
     check('샘플: 홈에 지금 통장 잔액', /^-?[\d,]+원$/.test(await b.eval(text('#balanceHero'))), await b.eval(text('#balanceHero')));
+    const upEv = await b.eval(text('#upcomingEvents'));
+    check('홈: 다가오는 일정(치과 D-2·친구 생일 매년 D-3)', upEv.includes('치과') && upEv.includes('D-2') && upEv.includes('친구 생일') && upEv.includes('매년') && !upEv.includes('면접'), upEv);
+    await b.click('#upcomingEvents [data-action="edit-event"]');
+    check('홈: 다가오는 일정을 누르면 일정 수정 시트', (await b.eval(text('#sheetTitle'))) === '일정 수정');
+    await b.click('[data-action="close-sheet"]');
+    await b.click('[data-action="settings"]');
+    await b.click('[data-action="help"][data-topic="widget"]');
+    check('도움말: 아이폰 위젯 만들기에 "위젯 스크립트 복사" 버튼', (await b.eval(text('#sheetTitle'))) === '아이폰 위젯 만들기' && (await b.eval("!!document.querySelector('[data-action=\"copy-widget\"]')")));
+    check('위젯 스크립트 파일을 앱 주소에서 받을 수 있음', await b.eval("fetch('widget/subcal-widget.js', { cache: 'no-store' }).then((r) => r.ok && r.text()).then((t) => !!t && t.includes('Scriptable') && t.includes('widgetSummary'))"));
+    await b.shot('6-widget-help');
+    await b.click('[data-action="close-sheet"]');
     await b.click('[data-action="balance"]');
     check('잔액 맞추기: 시트에 앱 계산 값과 입력 칸', await b.eval("!!document.querySelector('#balForm [name=\"amount\"]') && document.querySelector('#balForm').innerText.includes('지금 앱 계산')"));
     await b.shot('2-balance-sheet');
@@ -375,13 +386,13 @@ async function syncFlow() {
 
     // ----- 일정: PC에서 그날 시트로 추가 → 폰 달력에 보이고, 폰에는 추가·수정 버튼이 없다. 돈 계산은 그대로 -----
     await pc.tab('calendar');
-    await pc.click(`.cal-cell[data-date="${ym}-11"]`);
+    await pc.click(`.cal-cell[data-date="${today}"]`);
     await pc.click('#sheetBody [data-action="add-event"]');
-    check('일정: 그날 시트에서 열면 날짜가 그날', (await pc.eval("document.querySelector('#eventForm').elements.date.value")) === `${ym}-11`);
+    check('일정: 그날 시트에서 열면 날짜가 그날', (await pc.eval("document.querySelector('#eventForm').elements.date.value")) === `${today}`);
     await pc.eval("(() => { const f = document.querySelector('#eventForm'); f.elements.time.value = '14:30'; f.elements.title.value = '<b>치과</b>'; f.requestSubmit(); })()");
     check('일정: 저장하면 그날 시트로 돌아와 목록에 보임(글자 그대로)', (await pc.eval(text('#sheetBody'))).includes('<b>치과</b>') && (await pc.eval(text('#sheetBody'))).includes('14:30'), await pc.eval(text('#sheetBody')));
     await pc.click('[data-action="close-sheet"]');
-    check('일정: 달력 칸에 표시', await pc.eval(`!!document.querySelector('.cal-cell[data-date="${ym}-11"] .chip.ev')`));
+    check('일정: 달력 칸에 표시', await pc.eval(`!!document.querySelector('.cal-cell[data-date="${today}"] .chip.ev')`));
     check('PC: 일정 저장됨', await saved(), await pc.eval(text('#syncbar')));
     r = await remote();
     check('가짜 저장소: 일정 1건(시간 14:30)', r.version === 5 && r.events.length === 1 && r.events[0].time === '14:30', JSON.stringify(r.events));
@@ -391,7 +402,11 @@ async function syncFlow() {
     await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
     check('폰: 달력에 PC가 적은 일정', await phone.waitFor(`${text('#view-calendar')}.includes('<b>치과</b>')`), await phone.eval(text('#view-calendar')));
     check('폰: 일정 추가·수정 버튼 없음', await phone.eval("!document.querySelector('[data-action=\"add-event\"]') && !document.querySelector('[data-action=\"edit-event\"]')"));
-    await phone.click(`.cal-cell[data-date="${ym}-11"]`);
+    await phone.tab('home');
+    const phoneUp = await phone.eval(text('#upcomingEvents'));
+    check('폰: 홈 다가오는 일정에 PC가 적은 일정(오늘), 누를 수 없는 줄', phoneUp.includes('<b>치과</b>') && phoneUp.includes('오늘') && (await phone.eval("!document.querySelector('#upcomingEvents [data-action]')")), phoneUp);
+    await phone.tab('calendar');
+    await phone.click(`.cal-cell[data-date="${today}"]`);
     check('폰: 그날 시트에 일정은 보이고 추가 버튼은 없음', (await phone.eval(text('#sheetBody'))).includes('<b>치과</b>') && (await phone.eval("!document.querySelector('#sheetBody [data-action=\"add-event\"]')")));
     await phone.shot('9-phone-day-event');
     await phone.click('[data-action="close-sheet"]');
