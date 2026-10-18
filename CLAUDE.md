@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 명령어
 
-- `npm test`: `tests/*.test.js`를 `node --test`로 돌린다. `core.test.js`는 계산과 v1→v2 옮기기, `sync.test.js`는 가짜 fetch로 GitHub 요청·오류·`decideSync`를 확인한다.
+- `npm test`: `tests/*.test.js`를 `node --test`로 돌린다. `core.test.js`는 계산, 옛 형식 옮기기, 두 기기 합치기, `sync.test.js`는 가짜 fetch로 GitHub 요청·오류·`decideSync`를 확인한다.
 - `npm start`: http://localhost:8080 개발 서버(`tools/serve.js`, 의존성 없음).
   - 앱 파일 확장자만 내보내고 `.git` 같은 숨김 경로는 막는다.
   - **가짜 GitHub API(`/__gh/...`)가 들어 있다.** 메모리에만 저장하고, 이 개발 서버에만 있다.
