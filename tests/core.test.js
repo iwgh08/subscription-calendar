@@ -238,7 +238,7 @@ test('v3 저장본: 일정은 빈 목록으로 채우고 나머지는 그대로'
     updatedAt: '2026-10-15T00:00:00.000Z',
   };
   const s = Core.normalizeState(v3);
-  assert.equal(s.version, 4);
+  assert.equal(s.version, Core.STATE_VERSION);
   assert.deepEqual(s.events, []);
   assert.deepEqual({ ...s, events: undefined, version: 3 }, { ...v3, events: undefined });
 });
@@ -253,8 +253,8 @@ test('일정: 날짜가 틀리면 버리고, 이름이 비면 "일정", 시간�
     ],
   });
   assert.deepEqual(s.events, [
-    { id: '1', date: '2026-10-20', time: '14:30', title: '치과', memo: '' },
-    { id: '3', date: '2026-10-21', time: '', title: '일정', memo: '' },
+    { id: '1', date: '2026-10-20', time: '14:30', repeat: '', title: '치과', memo: '' },
+    { id: '3', date: '2026-10-21', time: '', repeat: '', title: '일정', memo: '' },
   ]);
 });
 
@@ -276,7 +276,7 @@ test('수입·잔액·일정·적은 시각은 백업을 거쳐도 남고(0원 �
     ...Core.emptyState(),
     expenses: [exp({ id: 'e1', date: '2026-10-15', amount: 5000, createdAt: '2026-10-15T06:00:00.000Z' })],
     incomes: [exp({ id: 'i1', date: '2026-10-15', amount: 300000, title: '용돈', createdAt: '2026-10-15T07:00:00.000Z' })],
-    events: [{ id: 'v1', date: '2026-10-20', time: '14:30', title: '치과', memo: '스케일링', createdAt: '2026-10-15T08:00:00.000Z' }],
+    events: [{ id: 'v1', date: '2026-10-20', time: '14:30', repeat: 'yearly', title: '치과', memo: '스케일링', createdAt: '2026-10-15T08:00:00.000Z' }],
     balance: { amount: 0, date: '2026-10-15', setAt: '2026-10-15T05:00:00.000Z', paidToday: true },
     updatedAt: '2026-10-15T07:00:00.000Z',
   };
@@ -370,4 +370,26 @@ test('같은 데이터인지: 수정 시각·백업 시각은 따지지 않는�
   const b = st({ events: [ev('e', '치과')], updatedAt: '2026-10-18T00:00:00.000Z', settings: { lastBackupAt: '2026-10-18T00:00:00.000Z' } });
   assert.equal(Core.sameData(a, b), true);
   assert.equal(Core.sameData(a, st({ events: [ev('e', '안과')] })), false);
+});
+
+test('매년 일정: 처음 날짜의 해부터 해마다 같은 월·일, 2월 29일은 평년에 28일', () => {
+  const events = [
+    { id: 'b', date: '2000-10-21', time: '', repeat: 'yearly', title: '생일' },
+    { id: 'f', date: '2024-02-29', time: '', repeat: 'yearly', title: '윤일' },
+    { id: 'n', date: '2030-10-05', time: '', repeat: 'yearly', title: '아직' },
+    { id: 'o', date: '2025-10-03', time: '', repeat: '', title: '한 번' },
+  ];
+  const oct = Core.eventsInMonth(events, 2026, 10);
+  assert.deepEqual(oct.map((e) => [e.id, e.date]), [['b', '2026-10-21']]);
+  assert.equal(oct[0].start, '2000-10-21');
+  assert.deepEqual(Core.eventsInMonth(events, 2027, 2).map((e) => e.date), ['2027-02-28']);
+  assert.deepEqual(Core.eventsInMonth(events, 2028, 2).map((e) => e.date), ['2028-02-29']);
+  assert.deepEqual(Core.eventsInMonth(events, 2030, 10).map((e) => e.id), ['n', 'b']);
+  assert.deepEqual(Core.eventsInMonth(events, 2025, 10).map((e) => e.id), ['o', 'b']);
+});
+
+test('v4 저장본: 일정의 반복은 없음으로 채운다', () => {
+  const s = Core.normalizeState({ version: 4, events: [{ id: 'e', date: '2026-10-20', time: '', title: '치과', memo: '' }] });
+  assert.equal(s.events[0].repeat, '');
+  assert.equal(Core.normalizeState({ events: [{ id: 'e', date: '2026-10-20', repeat: 'weekly' }] }).events[0].repeat, '');
 });

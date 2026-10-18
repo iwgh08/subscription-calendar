@@ -59,15 +59,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - v1(통장 불러오기 시절): 직접 입력한 거래(`source: 'manual'`)만 `expenses`·`incomes`로 옮긴다. 불러온 통장 거래, 제외 규칙, `payKey`, `matchKey`는 버린다(구독료가 두 번 계산되기 때문이다).
   - v2 → v3: `incomes: []`, `balance: null`을 채운다.
   - v3 → v4: `events: []`를 채운다. 날짜가 틀린 일정은 버리고, 이름이 비면 '일정', 시간은 `HH:MM`이 아니면 ''.
+  - v4 → v5: 일정에 `repeat`('yearly' 또는 '')을 채운다.
 - `mergeStates(base, local, remote)`: 두 입력 기기 내용 합치기. `subs`·`expenses`·`incomes`·`events`는 id별로 합친다.
   - 한쪽만 바뀐 항목은 바뀐 쪽을 쓴다(지운 것도 포함). 한쪽은 지우고 다른 쪽은 고쳤으면 고친 것을, 둘 다 고쳤으면 이 기기 것을 남긴다.
   - 잔액도 같은 규칙이고, 둘 다 맞췄으면 `setAt`이 나중인 것을 쓴다. 백업 시각은 나중 것.
   - 값 비교는 칸 순서를 무시한다(`canon`). `sameData`는 수정 시각·설정을 빼고 데이터가 같은지 본다.
 - `isNewerState`: 이 앱보다 새 버전이 저장한 내용이면 받지 않는다(받으면 모르는 칸이 사라진다). 그런 백업도 `readBackup`이 거부한다.
-- `eventsInMonth`: 그 달 일정을 날짜 → 시간 순으로(시간 없는 것이 그날 먼저). **일정은 금액이 없고 돈 계산(총 지출·잔액·계산 탭)에 넣지 않는다.**
-- state v4: `{ version: 4, subs, expenses, incomes, events, balance, settings: { lastBackupAt }, updatedAt }`
+- `eventsInMonth`: 그 달 일정을 날짜 → 시간 순으로(시간 없는 것이 그날 먼저). 매년 일정은 처음 날짜의 해부터 해마다 같은 월·일에 나오고(2월 29일은 평년에 28일), 돌려줄 때 `date`는 그해 날짜, `start`는 처음 날짜다. 고칠 때는 id로 원래 일정을 찾는다. **일정은 금액이 없고 돈 계산(총 지출·잔액·계산 탭)에 넣지 않는다.**
+- state v5: `{ version: 5, subs, expenses, incomes, events, balance, settings: { lastBackupAt }, updatedAt }`
   - `expenses`·`incomes`: `[{ id, date, amount, title, memo, createdAt? }]` — `createdAt`은 적은 시각(ISO)
-  - `events`: `[{ id, date, time, title, memo, createdAt? }]` — `time`은 'HH:MM' 또는 ''(하루 종일)
+  - `events`: `[{ id, date, time, repeat, title, memo, createdAt? }]` — `time`은 'HH:MM' 또는 ''(하루 종일), `repeat`은 'yearly'(매년, `date`는 처음 날짜) 또는 ''
   - `balance`: `{ amount, date, setAt, paidToday } | null` — 0원도 된다
 
 **`sync.js` — GitHub 연결(UMD, DOM 금지).**

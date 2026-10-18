@@ -47,11 +47,11 @@
     const balance = { amount: 850000, date: anchor, setAt: new Date(a.y, a.m - 1, a.d, 21, 0).toISOString(), paidToday: true };
     const events = [
       { id: 'v1', date: C.addDays(today, 2), time: '14:30', title: '치과', memo: '스케일링' },
-      { id: 'v2', date: C.addDays(today, 5), time: '', title: '친구 생일', memo: '' },
+      { id: 'v2', date: C.ymd(t.y - 20, t.m, Math.min(28, t.d + 3)), time: '', repeat: 'yearly', title: '친구 생일', memo: '' },
       { id: 'v3', date: C.addDays(today, 5), time: '19:00', title: '저녁 약속', memo: '' },
       { id: 'v4', date: C.addDays(today, -4), time: '10:00', title: '면접', memo: '' },
     ];
-    return { version: 4, subs, expenses, incomes, events, balance, settings: { lastBackupAt: null }, updatedAt: new Date().toISOString() };
+    return { version: 5, subs, expenses, incomes, events, balance, settings: { lastBackupAt: null }, updatedAt: new Date().toISOString() };
   }
 
   root.Demo = { build };

@@ -653,7 +653,7 @@
 
   // 일정 한 줄. withDate: 달 목록에서는 날짜도 보여 준다(그날 시트에서는 뺀다)
   const eventLine = (e, withDate = true) => `<li>${rowOpen('edit-event', e.id)}<i class="ev-mark"></i>
-      <div class="grow"><div class="name">${esc(e.title)}</div><div class="sub">${[withDate ? mdw(e.date) : '', e.time || '하루 종일', esc(e.memo)].filter(Boolean).join(' · ')}</div></div>${rowClose()}</li>`;
+      <div class="grow"><div class="name">${esc(e.title)}${e.repeat === 'yearly' ? ' <span class="badge">매년</span>' : ''}</div><div class="sub">${[withDate ? mdw(e.date) : '', e.time || '하루 종일', esc(e.memo)].filter(Boolean).join(' · ')}</div></div>${rowClose()}</li>`;
 
   // 지출·수입 고르기(빠른 입력 줄과 수정 시트)
   const kindSeg = (inc) => `<div class="seg" role="radiogroup" aria-label="종류">
@@ -954,7 +954,8 @@
     openSheet(
       e ? '일정 수정' : '일정 추가',
       `<form id="eventForm" class="form" data-id="${esc(e ? e.id : '')}" data-back="${esc(back || '')}" autocomplete="off" novalidate>
-        <label class="field"><span>날짜</span><input type="date" name="date" value="${esc(d)}"></label>
+        <label class="field"><span>날짜${e && e.repeat === 'yearly' ? ' <small>(매년 일정은 처음 날짜)</small>' : ''}</span><input type="date" name="date" value="${esc(d)}"></label>
+        <label class="check"><input type="checkbox" name="repeat"${e && e.repeat === 'yearly' ? ' checked' : ''}><span>매년 이날 반복(생일·기념일)</span></label>
         <label class="field"><span>시간 <small>(비우면 하루 종일)</small></span><input type="time" name="time" value="${esc(e ? e.time : '')}"></label>
         <label class="field"><span>내용</span><input name="title" maxlength="40" placeholder="예: 치과" value="${esc(e ? e.title : '')}"></label>
         <label class="field"><span>메모</span><input name="memo" maxlength="80" value="${esc(e ? e.memo : '')}"></label>
@@ -975,24 +976,32 @@
       form.elements.title.focus();
       return toast('내용을 적어 주세요.');
     }
-    const fields = { date, time: /^\d{2}:\d{2}$/.test(time) ? time : '', title, memo: String(fd.get('memo') || '').trim() };
+    const fields = { date, time: /^\d{2}:\d{2}$/.test(time) ? time : '', repeat: fd.get('repeat') === 'on' ? 'yearly' : '', title, memo: String(fd.get('memo') || '').trim() };
     const id = form.dataset.id;
     if (id) {
       const e = app.state.events.find((x) => x.id === id);
       if (!e) return closeSheet();
       Object.assign(e, fields);
     } else app.state.events.push({ id: uid(), ...fields, createdAt: new Date().toISOString() });
-    afterEvent(form.dataset.back, date);
+    afterEvent(form.dataset.back, fields.repeat ? yearlyOn(date, form.dataset.back) : date);
     commit(id ? '일정을 고쳤어요.' : '일정을 추가했어요.');
   }
 
   function deleteEvent() {
     const form = $('#eventForm');
     const e = form && app.state.events.find((x) => x.id === form.dataset.id);
-    if (!e || !confirm(`'${e.title}' 일정을 지울까요?`)) return;
+    if (!e || !confirm(`'${e.title}' 일정을 지울까요?${e.repeat === 'yearly' ? ' 매년 일정이라 모든 해에서 지워져요.' : ''}`)) return;
     app.state.events = app.state.events.filter((x) => x !== e);
     afterEvent(form.dataset.back, form.dataset.back);
     commit('일정을 지웠어요.');
+  }
+
+  // 매년 일정을 그날 시트에서 고쳤으면, 처음 날짜의 해가 아니라 보고 있던 해의 그날로 돌아간다
+  function yearlyOn(start, back) {
+    if (!C.isYmd(back)) return start;
+    const s = C.parseYmd(start);
+    const y = C.parseYmd(back).y;
+    return y < s.y ? start : C.ymd(y, s.m, Math.min(s.d, C.daysInMonth(y, s.m)));
   }
 
   // 그날 시트에서 열었으면 (날짜를 바꿨으면 바꾼 날의) 그날 시트로 돌아가고, 아니면 닫는다

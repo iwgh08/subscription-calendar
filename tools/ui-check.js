@@ -195,6 +195,14 @@ async function demoScreens() {
     check('달력: 그날 시트에서 일정을 누르면 수정 시트', (await b.eval(text('#sheetTitle'))) === '일정 수정');
     await b.shot('3-event-form');
     await b.click('[data-action="close-sheet"]');
+    check('매년 일정: 이번 달 목록에 "매년" 표시', (await b.eval(text('#view-calendar'))).includes('친구 생일') && (await b.eval("[...document.querySelectorAll('#view-calendar .list .name')].some((n) => n.innerText.includes('친구 생일') && n.innerText.includes('매년'))")));
+    for (let i = 0; i < 12; i++) await b.click('[data-action="next-month"]');
+    check('매년 일정: 1년 뒤 같은 달에도 나옴', (await b.eval(text('#view-calendar'))).includes('친구 생일') && !(await b.eval(text('#view-calendar'))).includes('치과'));
+    await b.click('#view-calendar [data-action="edit-event"]');
+    check('매년 일정: 고치기 시트에 "매년" 체크', await b.eval("document.querySelector('#eventForm [name=\"repeat\"]').checked"));
+    await b.shot('3-event-yearly');
+    await b.click('[data-action="close-sheet"]');
+    await b.click('[data-action="this-month"]');
     await b.tab('subs');
     await b.click('[data-action="add-sub"]');
     await b.shot('4-sub-form');
@@ -350,7 +358,7 @@ async function syncFlow() {
     check('일정: 달력 칸에 표시', await pc.eval(`!!document.querySelector('.cal-cell[data-date="${ym}-11"] .chip.ev')`));
     check('PC: 일정 저장됨', await saved(), await pc.eval(text('#syncbar')));
     r = await remote();
-    check('가짜 저장소: 일정 1건(시간 14:30)', r.version === 4 && r.events.length === 1 && r.events[0].time === '14:30', JSON.stringify(r.events));
+    check('가짜 저장소: 일정 1건(시간 14:30)', r.version === 5 && r.events.length === 1 && r.events[0].time === '14:30', JSON.stringify(r.events));
     await pc.tab('home');
     check('일정은 돈 계산에 안 들어감(잔액 125,000원·총 지출 67,400원)', (await pc.eval(text('#balanceHero'))) === '125,000원' && (await pc.eval(text('#monthTotal'))) === '67,400원');
     await phone.tab('calendar');

@@ -137,10 +137,20 @@
   const expensesInMonth = entriesInMonth;
 
   // 일정: 그 달의 것을 날짜 → 시간 순으로(시간 없는 것이 그날 맨 앞). 돈 계산에는 넣지 않는다
+  // 매년 일정(repeat: 'yearly')은 처음 날짜의 해부터 해마다 같은 월·일에 나온다. 2월 29일은 평년에 28일로.
+  // 돌려주는 항목의 date는 그 달에 나오는 날짜이고, 처음 날짜는 start에 있다(고칠 때는 id로 원래 일정을 찾는다)
   const eventKey = (e) => `${e.date} ${e.time || ''}`;
   function eventsInMonth(events, y, m) {
     const prefix = monthKey(y, m);
-    return (events || []).filter((e) => e.date.startsWith(prefix)).sort((a, b) => (eventKey(a) < eventKey(b) ? -1 : eventKey(a) > eventKey(b) ? 1 : 0));
+    const out = [];
+    for (const e of events || []) {
+      if (e.repeat === 'yearly') {
+        const s = parseYmd(e.date);
+        if (s.m !== m || s.y > y) continue;
+        out.push({ ...e, date: ymd(y, m, Math.min(s.d, daysInMonth(y, m))), start: e.date });
+      } else if (e.date.startsWith(prefix)) out.push(e);
+    }
+    return out.sort((a, b) => (eventKey(a) < eventKey(b) ? -1 : eventKey(a) > eventKey(b) ? 1 : 0));
   }
   const sumAmount = (list) => list.reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
@@ -219,7 +229,7 @@
 
   // ---------- 저장 상태 / 백업 ----------
   // 저장 형식 버전. 칸을 새로 만들면 올린다(옛 앱은 모르는 칸을 버리므로, 받은 쪽에서 다시 받게 하는 데 쓴다)
-  const STATE_VERSION = 4;
+  const STATE_VERSION = 5;
 
   function emptyState() {
     return { version: STATE_VERSION, subs: [], expenses: [], incomes: [], events: [], balance: null, settings: { lastBackupAt: null }, updatedAt: null };
@@ -243,11 +253,11 @@
     return out;
   }
 
-  // 일정 { id, date, time('HH:MM' 또는 ''), title, memo, createdAt? }. 날짜가 틀리면 버리고, 이름이 비면 '일정'
+  // 일정 { id, date, time('HH:MM' 또는 ''), repeat('yearly' 또는 ''), title, memo, createdAt? }. 날짜가 틀리면 버리고, 이름이 비면 '일정'
   function cleanEvent(e) {
     if (!e || typeof e !== 'object' || !isYmd(e.date)) return null;
     const time = typeof e.time === 'string' && /^\d{2}:\d{2}$/.test(e.time) ? e.time : '';
-    const out = { id: String(e.id), date: e.date, time, title: String(e.title || '').trim() || '일정', memo: String(e.memo || '') };
+    const out = { id: String(e.id), date: e.date, time, repeat: e.repeat === 'yearly' ? 'yearly' : '', title: String(e.title || '').trim() || '일정', memo: String(e.memo || '') };
     if (typeof e.createdAt === 'string' && e.createdAt) out.createdAt = e.createdAt;
     return out;
   }
@@ -263,6 +273,7 @@
   // v1: 직접 입력한 거래만 지출·수입으로 옮기고, 불러온 통장 거래는 버린다(구독료가 두 번 계산되므로). 제외 규칙도 버린다.
   // v2 → v3: 수입(incomes)과 잔액(balance) 칸이 생겼다
   // v3 → v4: 일정(events) 칸이 생겼다
+  // v4 → v5: 일정에 매년 반복(repeat) 칸이 생겼다(없으면 '')
   function normalizeState(s) {
     const base = emptyState();
     if (!s || typeof s !== 'object') return base;
