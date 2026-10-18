@@ -1368,6 +1368,36 @@
     render();
   }
 
+  // 달력(달력·계산 탭)을 옆으로 밀면 달을 넘긴다: 왼쪽 → 다음 달, 오른쪽 → 이전 달.
+  // 위아래 스크롤과 헷갈리지 않게 가로로 충분히(60px 이상, 세로의 1.5배 넘게) 빨리 민 것만 센다
+  let swipe = null;
+  document.addEventListener(
+    'touchstart',
+    (e) => {
+      const grid = e.touches.length === 1 && !app.sheet && e.target.closest('.cal-grid');
+      swipe = grid ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() } : null;
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    'touchend',
+    (e) => {
+      if (!swipe) return;
+      const p = e.changedTouches[0];
+      const dx = p.clientX - swipe.x;
+      const dy = p.clientY - swipe.y;
+      const quick = Date.now() - swipe.t < 800;
+      swipe = null;
+      if (!quick || Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      const n = dx < 0 ? 1 : -1;
+      moveMonth(n);
+      const grid = $(`#view-${app.view} .cal-grid`);
+      if (grid) grid.classList.add(n > 0 ? 'slide-next' : 'slide-prev');
+    },
+    { passive: true },
+  );
+  document.addEventListener('touchcancel', () => (swipe = null), { passive: true });
+
   const ACTIONS = {
     'prev-month': () => moveMonth(-1),
     'next-month': () => moveMonth(1),

@@ -987,8 +987,32 @@ details.more .field + .field {
     opacity: 1;
   }
 }
+/* 달력을 밀어 달을 넘길 때 미는 방향에서 들어온다 */
+.cal-grid.slide-next {
+  animation: cal-in-next 0.22s ease-out;
+}
+.cal-grid.slide-prev {
+  animation: cal-in-prev 0.22s ease-out;
+}
+@keyframes cal-in-next {
+  from {
+    transform: translateX(24px);
+    opacity: 0.4;
+  }
+}
+@keyframes cal-in-prev {
+  from {
+    transform: translateX(-24px);
+    opacity: 0.4;
+  }
+}
+.cal-grid {
+  touch-action: pan-y; /* 가로로 미는 것은 달 넘기기에 쓴다 */
+}
 @media (prefers-reduced-motion: reduce) {
-  .sheet-panel {
+  .sheet-panel,
+  .cal-grid.slide-next,
+  .cal-grid.slide-prev {
     animation: none;
   }
 }

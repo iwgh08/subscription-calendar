@@ -132,6 +132,18 @@ async function launch({ width, height, mobile }) {
       await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
       await wait(300);
     },
+    // sel 가운데에서 (dx, dy)만큼 손가락으로 민다
+    async swipe(sel, dx, dy = 0) {
+      await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+      const c = await b.eval(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: c.x, y: c.y }] });
+      for (let i = 1; i <= 5; i++) {
+        await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: c.x + (dx * i) / 5, y: c.y + (dy * i) / 5 }] });
+        await wait(20);
+      }
+      await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await wait(300);
+    },
     async offline(on) {
       await send('Network.emulateNetworkConditions', { offline: on, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     },
@@ -178,6 +190,20 @@ async function demoScreens() {
     await b.click('#chart rect.hit:last-of-type');
     check('그래프: 막대를 누르면 말풍선', await b.eval("!!document.querySelector('#chart .tooltip')"));
     await b.shot('2-chart-tooltip');
+    await b.tab('calendar');
+    const label0 = await b.eval(text('#monthLabel'));
+    await b.eval("document.querySelector('#view-calendar .cal-grid').scrollIntoView({ block: 'center' })");
+    await b.swipe('#view-calendar .cal-grid', -150);
+    const label1 = await b.eval(text('#monthLabel'));
+    check('달력 밀기: 왼쪽으로 밀면 다음 달(그날 시트는 안 열림)', label1 !== label0 && (await b.eval("document.querySelector('#sheet').hidden")), `${label0} → ${label1}`);
+    await b.swipe('#view-calendar .cal-grid', 150);
+    check('달력 밀기: 오른쪽으로 밀면 이전 달', (await b.eval(text('#monthLabel'))) === label0, await b.eval(text('#monthLabel')));
+    await b.swipe('#view-calendar .cal-grid', 30, 160);
+    check('달력 밀기: 위아래로 민 것은 달을 안 넘김', (await b.eval(text('#monthLabel'))) === label0 && (await b.eval("document.querySelector('#sheet').hidden")), await b.eval(text('#monthLabel')));
+    await b.tab('plan');
+    await b.swipe('#view-plan .cal-grid', -150);
+    check('계산 탭 달력도 밀면 다음 달', (await b.eval(text('#monthLabel'))) === label1, await b.eval(text('#monthLabel')));
+    await b.click('[data-action="this-month"]');
     await b.tab('calendar');
     await b.click('.cal-cell.has');
     check('달력: 날짜를 누르면 시트', await b.eval("!document.querySelector('#sheet').hidden"));
