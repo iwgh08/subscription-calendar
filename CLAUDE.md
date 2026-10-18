@@ -49,11 +49,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **`core.js` — 순수 로직(UMD, DOM 금지).** 날짜는 `'YYYY-MM-DD'` 문자열이고 계산은 UTC 일수로 한다.
 - `chargeDate`: 29~31일 결제는 짧은 달에 말일로 옮긴다. 매년 구독은 그 달에만 나온다. 시작일·종료일을 반영한다.
   - 새 구독의 시작일 기본값은 이번 달 1일이다. 등록하기 전 달의 합계에 끼어들지 않게 하기 위해서다.
-- `monthTotals(subs, expenses, y, m)` → `{ subs, other, total, count }`(수입은 넣지 않는다). `monthIncome`은 수입만 따로 센다. `monthProgress`는 결제일이 지난 것과 남은 것(오늘 포함)을 나눈다.
+- `monthTotals(subs, expenses, y, m)` → `{ subs, other, total, count }`(수입은 넣지 않는다). `monthIncome`은 수입만 따로 센다. **구독은 결제일 당일이 되면 바로 결제된 것으로 본다**(2026-10-18 사용자 요청). `monthProgress`는 결제된 것(오늘까지)과 남은 것(내일부터)을 나누고, `upcoming`·`nextChargeDate`는 내일부터 본다. 달력 목록 표시는 '결제됨'/'예정'.
 - `balanceNow(state, today)`: 맞춘 잔액이 없으면 null. 넣는 규칙은 다음과 같다(바꾸면 `core.test.js`의 잔액 테스트도 함께 고친다).
   - 맞춘 날보다 뒤이고 오늘까지인 수입·지출. 앞 날짜는 이미 잔액에 들어 있다고 보고, 앞으로의 날짜는 그날 넣는다.
   - 맞춘 날 날짜의 수입·지출은 맞춘 뒤에 적은 것(`createdAt > balance.setAt`)만 넣는다. 적은 시각이 없는 옛 항목은 넣지 않는다.
-  - 구독 결제는 `chargesBetween`으로 맞춘 날 다음 날~오늘을 센다. 맞춘 날의 결제는 `paidToday`(그때 이미 빠짐)가 아닐 때만 넣는다. 잔액 맞추기 시트는 그날 결제할 구독이 있을 때만 이 체크(기본: 빠짐)를 보여 준다.
+  - 구독 결제는 `chargesBetween`으로 맞춘 날 다음 날~오늘을 센다. 맞춘 날의 결제는 `paidToday`(그때 이미 빠짐)가 아닐 때만 넣는다. 새로 맞추면 언제나 `paidToday: true`다(당일 결제는 이미 빠졌다고 본다. 예전의 체크는 없앴고, false는 옛 저장본에만 있다).
 - `balanceOn(state, today, date, plans)`: 앞으로의 날짜 끝에 남는 돈 = `balanceNow(오늘)` + 오늘 다음 날~그날의 수입 − 지출 − 구독 결제 − 써 볼 지출(plans, 오늘~그날). plans 없이 계산하면 `balanceNow(state, date)`와 같다. 지난 날짜·잔액 없음이면 null.
 - `normalizeState`: 저장본·백업·GitHub에서 받은 내용을 읽을 때 모두 거친다. **여기서 고르지 않는 칸은 버려진다.** 칸을 새로 만들면 여기, `emptyState`, `isEmptyState`에 넣고 `STATE_VERSION`을 올린다.
   - v1(통장 불러오기 시절): 직접 입력한 거래(`source: 'manual'`)만 `expenses`·`incomes`로 옮긴다. 불러온 통장 거래, 제외 규칙, `payKey`, `matchKey`는 버린다(구독료가 두 번 계산되기 때문이다).

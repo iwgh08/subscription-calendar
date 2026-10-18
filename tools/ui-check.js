@@ -320,7 +320,7 @@ async function syncFlow() {
     check('폰: 화면으로 돌아오면 새 값(62,400원)', await phone.waitFor(`${text('#monthTotal')} === '62,400원'`), await phone.eval(text('#monthTotal')));
 
     // ----- 잔액: PC에서 맞춘 뒤 적은 수입은 더하고 지출은 뺀다. 수입은 총 지출에 안 들어간다. 폰도 같은 값 -----
-    // 오늘이 구독 결제일(3일)이면 '이미 빠졌어요'가 체크된 채로 저장된다 → 어느 날 돌려도 100,000원에서 시작
+    // 오늘이 구독 결제일(3일)이면 이미 빠진 것으로 저장된다 → 어느 날 돌려도 100,000원에서 시작
     const today = `${ym}-${String(now.getDate()).padStart(2, '0')}`;
     await pc.tab('home');
     await pc.click('[data-action="balance"]');

@@ -85,14 +85,15 @@
     return chargesInMonth(subs, y, m).reduce((sum, c) => sum + (Number(c.sub.amount) || 0), 0);
   }
 
-  // 그 달 구독 결제 중 결제일이 지난 것(오늘 전)과 남은 것(오늘 포함)
+  // 그 달 구독 결제 중 결제된 것(오늘까지)과 남은 것(내일부터)
   function monthProgress(subs, y, m, today) {
     const list = chargesInMonth(subs, y, m);
     const part = (arr) => ({ count: arr.length, amount: arr.reduce((s, c) => s + (Number(c.sub.amount) || 0), 0) });
-    return { count: list.length, past: part(list.filter((c) => c.date < today)), remain: part(list.filter((c) => c.date >= today)) };
+    // 결제일 당일이 되면 바로 결제된 것으로 본다(오늘은 past)
+    return { count: list.length, past: part(list.filter((c) => c.date <= today)), remain: part(list.filter((c) => c.date > today)) };
   }
 
-  // today부터 days일 뒤까지의 결제 예정(오늘 포함). dday = 남은 일수
+  // 내일부터 today + days일까지의 결제 예정(오늘 결제는 이미 된 것으로 본다). dday = 남은 일수
   function upcoming(subs, today, days) {
     const end = addDays(today, days);
     const t = parseYmd(today);
@@ -100,19 +101,19 @@
     const out = [];
     for (let cur = { y: t.y, m: t.m }; cur.y * 12 + cur.m <= e.y * 12 + e.m; cur = addMonths(cur.y, cur.m, 1)) {
       for (const c of chargesInMonth(subs, cur.y, cur.m)) {
-        if (c.date >= today && c.date <= end) out.push({ sub: c.sub, date: c.date, dday: diffDays(today, c.date) });
+        if (c.date > today && c.date <= end) out.push({ sub: c.sub, date: c.date, dday: diffDays(today, c.date) });
       }
     }
     return out.sort(byDateThenName);
   }
 
-  // 오늘 이후 첫 결제일(13개월 안에 없으면 null — 끝난 구독)
+  // 오늘 다음의 첫 결제일(오늘 결제는 이미 됐다. 13개월 안에 없으면 null — 끝난 구독)
   function nextChargeDate(sub, today) {
     const t = parseYmd(today);
     for (let i = 0; i <= 13; i++) {
       const { y, m } = addMonths(t.y, t.m, i);
       const date = chargeDate(sub, y, m);
-      if (date && date >= today) return date;
+      if (date && date > today) return date;
     }
     return null;
   }

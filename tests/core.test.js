@@ -42,7 +42,6 @@ test('다가오는 결제와 D-day', () => {
   assert.deepEqual(
     Core.upcoming(subs, '2026-10-15', 30).map((c) => [c.sub.name, c.date, c.dday]),
     [
-      ['넷플릭스', '2026-10-15', 0],
       ['클라우드', '2026-10-31', 16],
       ['유튜브', '2026-11-03', 19],
     ],
@@ -51,7 +50,7 @@ test('다가오는 결제와 D-day', () => {
 
 test('다음 결제일과 끝난 구독', () => {
   assert.equal(Core.nextChargeDate(sub({ day: 10 }), '2026-10-15'), '2026-11-10');
-  assert.equal(Core.nextChargeDate(sub({ day: 15 }), '2026-10-15'), '2026-10-15');
+  assert.equal(Core.nextChargeDate(sub({ day: 15 }), '2026-10-15'), '2026-11-15'); // 오늘 결제는 이미 됐다
   assert.equal(Core.nextChargeDate(sub({ day: 10, endDate: '2026-10-31' }), '2026-10-15'), null);
 });
 
@@ -63,12 +62,12 @@ test('그 달 구독료 합계와 월 환산 합계', () => {
   assert.equal(Core.monthlyEquivalent([sub({ amount: 5000, endDate: '2026-09-30' })], '2026-10-15'), 0);
 });
 
-test('결제일이 지난 구독과 남은 구독(오늘은 남은 쪽)', () => {
+test('결제된 구독과 남은 구독(결제일 당일은 결제된 쪽)', () => {
   const subs = [sub({ id: 'a', amount: 14900, day: 3 }), sub({ id: 'b', amount: 13500, day: 15 }), sub({ id: 'c', amount: 10900, day: 27 })];
   assert.deepEqual(Core.monthProgress(subs, 2026, 10, '2026-10-15'), {
     count: 3,
-    past: { count: 1, amount: 14900 },
-    remain: { count: 2, amount: 24400 },
+    past: { count: 2, amount: 28400 },
+    remain: { count: 1, amount: 10900 },
   });
   assert.equal(Core.monthProgress(subs, 2026, 9, '2026-10-15').remain.count, 0);
 });

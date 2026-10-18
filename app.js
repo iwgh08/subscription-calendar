@@ -436,9 +436,9 @@
     let subNote;
     if (!s.subs.length) subNote = readOnly() ? '등록한 구독이 없어요.' : '등록한 구독이 없어요. <button class="link" data-action="add-sub">구독 추가</button>';
     else if (!pr.count) subNote = '이 달에는 결제할 구독이 없어요.';
-    else if (!pr.remain.count) subNote = `이 달 구독 결제 ${pr.count}건이 모두 지났어요.`;
+    else if (!pr.remain.count) subNote = `이 달 구독 결제 ${pr.count}건이 모두 결제됐어요.`;
     else if (!pr.past.count) subNote = `남은 구독 결제 ${pr.remain.count}건 ${won(pr.remain.amount)}`;
-    else subNote = `구독 결제 지남 ${pr.past.count}건 · 남은 ${pr.remain.count}건 ${won(pr.remain.amount)}`;
+    else subNote = `구독 결제됨 ${pr.past.count}건 · 남은 ${pr.remain.count}건 ${won(pr.remain.amount)}`;
 
     $('#view-home').innerHTML = `
       ${balanceCard()}
@@ -578,7 +578,8 @@
   }
 
   // ----- 달력 -----
-  const whenBadge = (date) => `<span class="badge">${date < app.today ? '지남' : '예정'}</span>`;
+  // 결제일 당일이 되면 바로 결제된 것으로 본다
+  const whenBadge = (date) => `<span class="badge">${date <= app.today ? '결제됨' : '예정'}</span>`;
 
   function renderCalendar() {
     const charges = C.chargesInMonth(app.state.subs, app.y, app.m);
@@ -1030,8 +1031,7 @@
         <label class="field"><span>지금 잔액(원)</span><input name="amount" inputmode="numeric" placeholder="예: 1,250,000"></label>
         ${
           due.length
-            ? `<label class="check"><input type="checkbox" name="paidToday" checked><span>오늘 결제일인 구독(${esc(due.map((c) => `${c.sub.name} ${won(c.sub.amount)}`).join(', '))})이 이미 통장에서 빠졌어요</span></label>
-          <p class="note">아직 안 빠졌으면 체크를 풀어 주세요. 그러면 앱이 오늘 빼서 계산해요.</p>`
+            ? `<p class="note">오늘 결제일인 구독(${esc(due.map((c) => `${c.sub.name} ${won(c.sub.amount)}`).join(', '))})은 이미 통장에서 빠진 것으로 보고 계산해요.</p>`
             : ''
         }
         <div class="actions"><button class="btn primary" type="submit">저장</button>${app.state.balance ? '<button type="button" class="btn danger" data-action="balance-clear">잔액 계산 끄기</button>' : ''}</div>
@@ -1049,7 +1049,7 @@
       return toast('지금 잔액을 적어 주세요.'); // 0원도 적을 수 있게 빈칸만 막는다
     }
     app.today = C.todayStr();
-    app.state.balance = { amount: digits(raw), date: app.today, setAt: new Date().toISOString(), paidToday: fd.get('paidToday') === 'on' };
+    app.state.balance = { amount: digits(raw), date: app.today, setAt: new Date().toISOString(), paidToday: true }; // 결제일 당일이면 이미 빠졌다고 본다
     closeSheet();
     commit('잔액을 맞췄어요.');
   }
