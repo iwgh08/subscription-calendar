@@ -922,7 +922,8 @@
     if (readOnly()) return;
     const e = id ? app.state.events.find((x) => x.id === id) : null;
     if (id && !e) return;
-    const d = e ? e.date : C.isYmd(date) ? date : app.today;
+    // 날짜를 안 정했으면 보고 있는 달(이번 달이면 오늘, 다른 달이면 그 달 1일)
+    const d = e ? e.date : C.isYmd(date) ? date : isThisMonth() ? app.today : C.ymd(app.y, app.m, 1);
     openSheet(
       e ? '일정 수정' : '일정 추가',
       `<form id="eventForm" class="form" data-id="${esc(e ? e.id : '')}" data-back="${esc(back || '')}" autocomplete="off" novalidate>
