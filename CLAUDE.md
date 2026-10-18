@@ -6,12 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 개인용 PWA "구독달력"이다(https://iwgh08.github.io/subscription-calendar/). **사용자 혼자 쓴다.** 공유, 다른 은행, 온보딩 같은 다른 사람용 기능은 넣지 않는다. 설명·UI 문구·주석은 한국어, 식별자는 영어로 쓴다.
 
-- **PC에서 직접 입력하고, 아이폰은 보기만 한다.** 신한 거래내역 불러오기와 통장 맞춰 보기(✓·!)는 사용자가 원하지 않아서 뺐다. 다시 넣자고 먼저 제안하지 않는다.
+- **PC와 아이폰 둘 다 입력 기기로 고칠 수 있다**(2026-10-18 사용자 요청으로 바꿈. 그 전에는 폰은 보기만 했다). 보기 기기(읽기 전용) 역할도 남겨 두었다. 신한 거래내역 불러오기와 통장 맞춰 보기(✓·!)는 사용자가 원하지 않아서 뺐다. 다시 넣자고 먼저 제안하지 않는다.
 - **한 달 총 지출 = 정기 구독료 + 직접 입력한 지출.** 정기 구독료는 등록한 구독의 결제일을 기준으로 그 달 전체를 센다. 구독 결제는 지출로 따로 입력하지 않는다(두 번 계산된다). **수입은 총 지출·그래프에 넣지 않는다.**
 - **지금 통장 잔액 = 사용자가 맞춘 잔액 + 그 뒤 수입 − 그 뒤 지출 − 그 뒤 구독 결제(오늘까지).** 은행과 연결된 값이 아니라 앱이 계산한 값이다. 구독은 모두 신한 통장(네이버페이 체크카드)에서 빠진다고 본다.
   - 잔액은 사용자가 앱(PC)에서 직접 적는다. 실제 금액을 코드·테스트·샘플·캡처에 넣지 않는다(앱 저장소는 공개다).
 - **PC ↔ 폰 연결:** GitHub 비공개 저장소 `iwgh08/subscription-data`의 `state.json` 파일 하나로 잇는다.
-  - 입력 기기(PC, 읽기·쓰기 토큰)가 올리고, 보기 기기(폰, 읽기 전용 토큰)가 받는다.
+  - 입력 기기(읽기·쓰기 토큰)는 올리고 받는다. 보기 기기(읽기 전용 토큰)는 받기만 한다.
+  - 두 입력 기기가 따로 고치면 기준본(base)과 비교해 항목별로 합친다(`mergeStates`). 묻지 않는다.
   - 서버는 없다. 데이터는 각 기기의 IndexedDB(`subcal` DB, `kv` 저장소)에도 있다.
   - 빌드 과정은 없고, 외부 요청은 CSP로 `api.github.com`만 허용한다.
 
@@ -27,7 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     - 테스트 도우미: `POST /__gh/_reset`, `GET·POST /__gh/_file`, `POST /__gh/_down`(on/off — 연결 끊김 흉내)
 - `node tools/ui-check.js <폴더>`: `npm start`를 켠 상태에서 헤드리스 Edge를 DevTools 프로토콜로 조종한다(PASS/FAIL 출력).
   - 샘플 화면: 390×844 모바일 에뮬레이션, 다크 모드
-  - PC(1024px)와 폰(390px) 브라우저 두 개로: 연결 → 빠른 입력(Enter) → 폰이 받아옴 → 화면 복귀 시 갱신 → 잔액 맞추기·수입 → 일정 추가(폰 달력에 보임) → 옛 형식 저장본 다시 받기 → 오프라인 → 충돌 → 계산 탭(내일 남는 돈·써 볼 지출·지출로 적기) → 새 버전 내용 거부 → 틀린 토큰
+  - PC(1024px)와 폰(390px) 브라우저 두 개로: 연결 → 빠른 입력(Enter) → 폰이 받아옴 → 화면 복귀 시 갱신 → 잔액 맞추기·수입 → 일정 추가(폰 달력에 보임) → 옛 형식 저장본 다시 받기 → 오프라인 → 충돌(기준본 없음 → 묻는 시트) → 계산 탭(내일 남는 돈·써 볼 지출·지출로 적기) → 새 버전 내용 거부 → 틀린 토큰 → 폰도 입력 기기로 다시 연결 → 둘 다 끊긴 사이 고친 것 합치기·지운 것 안 되살아남
   - 화면이나 동기화를 바꾸면 돌린다.
   - `BASE_URL=https://iwgh08.github.io/subscription-calendar`를 주면 배포된 사이트의 샘플 화면만 점검한다.
 - `node tools/shot.js "/?demo=1#calendar" out.png [폭] [높이] [light|dark]`: 화면 한 장 캡처. 헤드리스 Edge는 창 폭이 약 500px 아래로 줄지 않아서 iframe에 넣어 찍는다.
@@ -58,6 +59,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - v1(통장 불러오기 시절): 직접 입력한 거래(`source: 'manual'`)만 `expenses`·`incomes`로 옮긴다. 불러온 통장 거래, 제외 규칙, `payKey`, `matchKey`는 버린다(구독료가 두 번 계산되기 때문이다).
   - v2 → v3: `incomes: []`, `balance: null`을 채운다.
   - v3 → v4: `events: []`를 채운다. 날짜가 틀린 일정은 버리고, 이름이 비면 '일정', 시간은 `HH:MM`이 아니면 ''.
+- `mergeStates(base, local, remote)`: 두 입력 기기 내용 합치기. `subs`·`expenses`·`incomes`·`events`는 id별로 합친다.
+  - 한쪽만 바뀐 항목은 바뀐 쪽을 쓴다(지운 것도 포함). 한쪽은 지우고 다른 쪽은 고쳤으면 고친 것을, 둘 다 고쳤으면 이 기기 것을 남긴다.
+  - 잔액도 같은 규칙이고, 둘 다 맞췄으면 `setAt`이 나중인 것을 쓴다. 백업 시각은 나중 것.
+  - 값 비교는 칸 순서를 무시한다(`canon`). `sameData`는 수정 시각·설정을 빼고 데이터가 같은지 본다.
 - `isNewerState`: 이 앱보다 새 버전이 저장한 내용이면 받지 않는다(받으면 모르는 칸이 사라진다). 그런 백업도 `readBackup`이 거부한다.
 - `eventsInMonth`: 그 달 일정을 날짜 → 시간 순으로(시간 없는 것이 그날 먼저). **일정은 금액이 없고 돈 계산(총 지출·잔액·계산 탭)에 넣지 않는다.**
 - state v4: `{ version: 4, subs, expenses, incomes, events, balance, settings: { lastBackupAt }, updatedAt }`
@@ -73,17 +78,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `decideSync`
   - 보기 기기는 절대 올리지 않는다.
   - 입력 기기는 원격이 그대로면 dirty일 때 올린다. 원격이 바뀌었으면 dirty가 아닐 때만 받아오고, dirty면 충돌이다.
-  - 데이터가 있는 PC를 처음 연결하면 dirty로 시작한다. 원격 파일이 있으면 조용히 덮지 않고 충돌로 묻는다.
+  - 데이터가 있는 입력 기기를 처음 연결하면 dirty로 시작한다. 원격 파일이 있으면 조용히 덮지 않는다. 내용이 같으면 그대로 맞추고, 다르면(기준본이 없으니) 충돌로 묻는다.
 - `state.json`은 1MB를 넘으면 contents API로 받을 수 없다(`too-large` 오류). 그 정도로 커지면 raw 받기로 바꿔야 한다.
 
 **`app.js` — 화면.**
 - 상태를 바꾸면 `commit()`이 `updatedAt`을 갱신하고, 입력 기기면 `dirty`를 표시한다. 그다음 `persist()`(state와 sync를 한 트랜잭션에 저장) → `render()` → 1.5초 뒤 `pushOnce`로 이어진다.
 - GitHub 요청은 `serial()` 대기열로 하나씩 실행한다.
+- **기준본 `app.base`는 항상 `app.sync.sha` 때의 GitHub 내용이다.** IndexedDB `base` 키에 state·sync와 한 트랜잭션으로 저장한다. 백업과 `state.json`에는 넣지 않는다.
+  - 받아올 때(`applyRemote`)는 받은 내용으로, 올리기에 성공하면 올린 snapshot으로 바꾼다. 충돌 시트에서 고르면 그때 원격 내용으로, 연결·끊기·옛 형식 저장본이면 지운다.
+  - 기준본이 없고 원격 sha가 같으면, 열 때 원격 내용으로 채운다(업데이트 전부터 쓰던 기기).
+  - 충돌(dirty인데 원격이 바뀜, 또는 올리다 409)은 `resolveConflict`가 처리한다. 내용이 같으면 받아오고, 기준본이 있으면 합친다. 합친 state, 원격 sha, 새 기준본(원격)을 함께 저장한 뒤 올린다. 기준본이 없을 때만 시트로 묻는다.
 - `visibilitychange`
   - hidden: 안 올린 변경을 바로 올린다.
   - visible: 날짜를 갱신하고 `syncNow`를 부른다. `online` 이벤트 때도 `syncNow`를 부른다.
 - 상태 줄(`#syncbar`)
-  - 보기 기기는 **항상 두 시각**("PC 수정 … · 받아옴 …")을 보여 준다. 실패하면 경고와 HTTP 상태를 보여 준다. 옛 데이터를 조용히 보여 주지 않게 하기 위해서다.
+  - 보기 기기는 **항상 두 시각**("수정 … · 받아옴 …")을 보여 준다. 실패하면 경고와 HTTP 상태를 보여 준다. 옛 데이터를 조용히 보여 주지 않게 하기 위해서다.
   - `body[data-sync]`(off/busy/ok/error)는 점검 스크립트가 본다.
 - 보기 기기(`readOnly()`)는 추가·수정·삭제 버튼, 빠른 입력 줄, 잔액 맞추기, 백업 불러오기, 전체 삭제를 그리지 않는다. 목록 줄도 누를 수 없는 `div`로 그린다.
 - 저장본의 `version`이 옛것이면 옮긴 내용을 저장하고, `sync.sha`를 지워서 한 번 다시 받는다(보기 기기, 그리고 안 올린 변경이 없는 입력 기기). 옛 앱(배포 전에 열어 둔 창 포함)이 받으면서 수입·잔액 칸을 버렸을 수 있는데, 원격 sha가 같으면 다시 받지 않기 때문이다.
@@ -114,7 +123,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 토큰은 그 기기의 IndexedDB에만 둔다. 코드, 공개 저장소, 백업 파일에 넣지 않는다. **사용자에게 토큰을 채팅에 붙여 넣게 하지 않는다.**
 - `iwgh08.github.io` 아래의 모든 Pages 사이트는 같은 출처라서 IndexedDB를 서로 읽을 수 있다. **이 계정의 어떤 Pages 사이트에도 외부 스크립트를 넣지 않는다.** CSP는 `script-src 'self'`를 유지한다.
-- 토큰 권한은 최소로 한다: 저장소 하나, Contents만, 폰은 Read-only.
+- 토큰 권한은 최소로 한다: 저장소 하나, Contents만. 폰에서도 고치려면 Read and write(보기만 할 기기는 Read-only). PC용·폰용 토큰을 따로 만들어서, 폰을 잃어버리면 폰용만 지운다.
 
 ## 배포
 

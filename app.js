@@ -1,7 +1,8 @@
 /* 구독달력 화면
  * 흐름: app.state(저장되는 데이터)를 바꾼다 → commit() → IndexedDB에 저장 → 지금 탭을 다시 그린다 → 입력 기기면 GitHub에 올린다.
- * PC ↔ 폰 연결(sync.js): 입력 기기(PC)가 GitHub 비공개 저장소의 state.json에 올리고,
- * 보기 기기(폰)는 열 때·화면으로 돌아올 때마다 받아 와서 읽기 전용으로 보여 준다.
+ * PC ↔ 폰 연결(sync.js): 입력 기기(PC·폰 모두 될 수 있다)가 GitHub 비공개 저장소의 state.json에 올리고 받는다.
+ * 두 입력 기기가 따로 고쳤으면 기준본(base, 마지막으로 맞춘 내용)과 비교해 항목별로 합친다.
+ * 보기 기기는 열 때·화면으로 돌아올 때마다 받아 와서 읽기 전용으로 보여 준다.
  * 사용자 입력·GitHub에서 받은 글자는 모두 esc()를 거쳐 HTML에 넣는다(토큰이 저장되는 앱이라 특히 중요하다).
  */
 (function () {
@@ -22,7 +23,6 @@
     return local && v && /^\/[A-Za-z0-9_\-/]*$/.test(v) ? location.origin + v : S.API;
   })();
   const IS_IOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  const LOOKS_LIKE_PHONE = navigator.standalone === true || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
   const app = {
     state: C.emptyState(),
@@ -36,6 +36,7 @@
     sync: null, // { repo, token, role: 'writer' | 'reader', sha, dirty, lastSyncAt, remoteUpdatedAt }
     status: null, // 연결 상태 { kind: 'busy' | 'ok' | 'error', text }
     conflictRemote: null,
+    base: null, // 기준본: app.sync.sha 때의 GitHub 내용(합치기에 쓴다). 이 기기에만 둔다
     quickDate: null, // 빠른 입력 줄에서 마지막으로 쓴 날짜
     planDate: null, // 계산 탭에서 고른 날짜
     plans: [], // 계산 탭의 써 볼 지출 [{ id, date, amount, title }] — 저장하지 않는다
@@ -141,10 +142,10 @@
     },
   };
 
-  // 데이터와 연결 설정(아직 안 올린 변경 표시 포함)을 함께 저장한다 — 둘이 어긋나지 않게
+  // 데이터와 연결 설정(아직 안 올린 변경 표시 포함)·기준본을 함께 저장한다 — 서로 어긋나지 않게
   function persist() {
     if (!app.canSave) return Promise.resolve();
-    return DB.setMany({ state: app.state, sync: app.sync || undefined }).catch(() => toast('저장하지 못했어요. 저장 공간을 확인해 주세요.'));
+    return DB.setMany({ state: app.state, sync: app.sync || undefined, base: (app.sync && app.base) || undefined }).catch(() => toast('저장하지 못했어요. 저장 공간을 확인해 주세요.'));
   }
 
   // 데이터를 바꾼 뒤 부른다. 입력 기기면 잠시 뒤 GitHub에 올린다
@@ -180,7 +181,7 @@
     const st = app.status;
     if (readOnly()) {
       // 보기 기기는 옛 데이터를 조용히 보여 주지 않도록 두 시각을 항상 보여 준다
-      const times = `PC 수정 ${app.sync.remoteUpdatedAt ? hm(app.sync.remoteUpdatedAt) : '-'} · 받아옴 ${app.sync.lastSyncAt ? hm(app.sync.lastSyncAt) : '-'}`;
+      const times = `수정 ${app.sync.remoteUpdatedAt ? hm(app.sync.remoteUpdatedAt) : '-'} · 받아옴 ${app.sync.lastSyncAt ? hm(app.sync.lastSyncAt) : '-'}`;
       return st && st.kind !== 'ok' ? `${st.text} · ${times}` : times;
     }
     if (st && st.kind !== 'ok') return st.text;
@@ -219,6 +220,7 @@
         const remote = await c.read();
         if (remote && C.isNewerState(remote.state)) return setStatus('error', NEWER_TEXT);
         if (!remote) await c.checkRepo(); // 404가 '파일 없음'인지 '저장소·권한 없음'인지 가린다
+        if (remote && remote.sha === app.sync.sha && !app.base) app.base = clone(C.normalizeState(remote.state)); // 기준본이 없던 기기(업데이트 전)
         const action = S.decideSync({
           role: app.sync.role,
           remoteSha: remote ? remote.sha : null,
@@ -227,11 +229,8 @@
           localEmpty: C.isEmptyState(app.state),
         });
         if (action === 'pull') return applyRemote(remote);
-        if (action === 'conflict') {
-          setStatus('error', 'GitHub과 이 PC의 내용이 달라요');
-          return openConflict(remote);
-        }
-        if (action === 'missing') return setStatus('error', 'PC에서 아직 올린 내용이 없어요');
+        if (action === 'conflict') return resolveConflict(remote);
+        if (action === 'missing') return setStatus('error', '아직 올린 내용이 없어요');
         if (!remote) app.sync.sha = null; // 원격 파일이 없으면 새로 만든다
         if (action === 'push') return pushOnce();
         app.sync.lastSyncAt = new Date().toISOString(); // 바뀐 건 없어도 확인한 시각은 남긴다
@@ -250,6 +249,7 @@
     const snapshot = JSON.parse(JSON.stringify(app.state));
     try {
       app.sync.sha = await client().write(snapshot, app.sync.sha);
+      app.base = snapshot; // 올린 내용이 새 기준본(올리는 사이에 바뀐 app.state가 아니라)
       app.sync.lastSyncAt = new Date().toISOString();
       app.sync.remoteUpdatedAt = snapshot.updatedAt;
       if (app.state.updatedAt === snapshot.updatedAt) app.sync.dirty = false; // 올리는 사이에 또 바뀌었으면 한 번 더
@@ -258,15 +258,12 @@
       if (app.sync.dirty) schedulePush(300);
     } catch (e) {
       if (e.code === 'conflict') {
-        // 다른 곳에서 먼저 바뀌었다 → 다시 받아서 어느 쪽을 남길지 묻는다
+        // 다른 기기에서 먼저 바뀌었다 → 다시 받아서 합친다(기준본이 없으면 어느 쪽을 남길지 묻는다)
         const remote = await client()
           .read()
           .catch(() => null);
         if (remote && C.isNewerState(remote.state)) return setStatus('error', NEWER_TEXT);
-        if (remote && remote.sha !== app.sync.sha) {
-          setStatus('error', 'GitHub과 이 PC의 내용이 달라요');
-          return openConflict(remote);
-        }
+        if (remote && remote.sha !== app.sync.sha) return resolveConflict(remote, true);
       }
       setStatus('error', `올리지 못함: ${S.describe(e)}`);
     }
@@ -274,6 +271,7 @@
 
   function applyRemote(remote) {
     app.state = C.normalizeState(remote.state);
+    app.base = clone(app.state);
     app.sync.sha = remote.sha;
     app.sync.dirty = false;
     app.sync.lastSyncAt = new Date().toISOString();
@@ -284,15 +282,41 @@
     if (app.sheet && app.sheet.refresh) app.sheet.refresh();
   }
 
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+
+  // 이 기기와 GitHub이 둘 다 바뀌었을 때(serial 안에서만 부른다).
+  //  내용이 같으면 그대로 맞춘 것으로 본다(보기 기기였다가 입력 기기로 다시 연결한 폰 등)
+  //  기준본이 있으면 항목별로 합쳐서 올린다. 없으면(처음 연결한 기기) 어느 쪽을 남길지 묻는다
+  function resolveConflict(remote, fromPush) {
+    const r = C.normalizeState(remote.state);
+    if (C.sameData(app.state, r)) return applyRemote(remote);
+    if (!app.base) {
+      setStatus('error', 'GitHub과 이 기기의 내용이 달라요');
+      return openConflict(remote);
+    }
+    const merged = C.mergeStates(app.base, app.state, r, new Date().toISOString());
+    app.base = clone(r);
+    app.sync.sha = remote.sha;
+    if (C.sameData(merged, r)) return applyRemote(remote); // 이 기기에서 바꾼 것이 이미 들어 있다
+    app.state = merged;
+    app.sync.dirty = true; // 기준본·sha와 함께 저장해야, 올리기에 실패해도 다음에 지운 항목이 되살아나지 않는다
+    persist();
+    render();
+    if (app.sheet && app.sheet.refresh) app.sheet.refresh();
+    toast('다른 기기에서 고친 내용과 합쳤어요.');
+    if (fromPush) return schedulePush(300); // 올리는 중에 났으면 대기열에서 한 번 더
+    return pushOnce();
+  }
+
   function openConflict(remote) {
     const r = C.normalizeState(remote.state);
-    const line = (s) => `구독 ${s.subs.length}개 · 지출 ${s.expenses.length}건 · 수입 ${s.incomes.length}건 · 수정 ${s.updatedAt ? hm(s.updatedAt) : '-'}`;
+    const line = (s) => `구독 ${s.subs.length}개 · 지출 ${s.expenses.length}건 · 수입 ${s.incomes.length}건 · 일정 ${s.events.length}건 · 수정 ${s.updatedAt ? hm(s.updatedAt) : '-'}`;
     app.conflictRemote = remote;
     openSheet(
-      'GitHub과 이 PC의 내용이 달라요',
-      `<p>다른 곳에서 GitHub 내용이 바뀌었는데, 이 PC에도 아직 올리지 않은 변경이 있어요. 어느 쪽을 남길지 골라 주세요.</p>
-      <dl class="kv"><dt>GitHub</dt><dd>${esc(line(r))}</dd><dt>이 PC</dt><dd>${esc(line(app.state))}</dd></dl>
-      <div class="actions"><button class="btn" data-action="conflict-remote">GitHub 내용 쓰기</button><button class="btn primary" data-action="conflict-local">이 PC 내용으로 덮어쓰기</button></div>
+      'GitHub과 이 기기의 내용이 달라요',
+      `<p>GitHub 내용과 이 기기의 내용이 서로 달라요. 이 기기는 아직 GitHub과 한 번도 맞춘 적이 없어서 자동으로 합칠 수 없어요. 어느 쪽을 남길지 골라 주세요.</p>
+      <dl class="kv"><dt>GitHub</dt><dd>${esc(line(r))}</dd><dt>이 기기</dt><dd>${esc(line(app.state))}</dd></dl>
+      <div class="actions"><button class="btn" data-action="conflict-remote">GitHub 내용 쓰기</button><button class="btn primary" data-action="conflict-local">이 기기 내용으로 덮어쓰기</button></div>
       <p class="note">고르기 전까지는 GitHub에 올리지 않아요.</p>`,
       { kind: 'conflict' },
     );
@@ -321,15 +345,17 @@
       const localEmpty = C.isEmptyState(app.state);
       // 보기 기기에 데이터가 있으면 언제나 먼저 묻는다. PC가 아직 안 올렸어도, PC가 처음 올리는 순간 이 기기 내용이 바뀌기 때문이다
       if (role === 'reader' && !localEmpty) {
-        const mine = `구독 ${app.state.subs.length}개, 지출 ${app.state.expenses.length}건, 수입 ${app.state.incomes.length}건`;
+        const mine = `구독 ${app.state.subs.length}개, 지출 ${app.state.expenses.length}건, 수입 ${app.state.incomes.length}건, 일정 ${app.state.events.length}건`;
         const msg = remote
-          ? `이 기기에 있는 데이터(${mine})를 PC에서 올린 내용으로 바꿀까요? 이 기기에만 있는 내용은 사라져요.`
-          : `PC에서 아직 올린 내용이 없어요. 연결하면 PC가 처음 올릴 때 이 기기의 데이터(${mine})가 그 내용으로 바뀌어요. 먼저 백업 파일을 만들어 PC로 옮기는 게 좋아요. 그래도 연결할까요?`;
+          ? `이 기기에 있는 데이터(${mine})를 GitHub에 올라온 내용으로 바꿀까요? 이 기기에만 있는 내용은 사라져요.`
+          : `다른 기기에서 아직 올린 내용이 없어요. 연결하면 처음 올라오는 내용으로 이 기기의 데이터(${mine})가 바뀌어요. 먼저 백업 파일을 만들어 옮기는 게 좋아요. 그래도 연결할까요?`;
         if (!confirm(msg)) return;
       }
-      // 데이터가 있는 PC를 처음 연결하면 '안 올린 변경'으로 본다 → 원격 파일이 있으면 덮지 않고 충돌로 묻는다
+      // 데이터가 있는 입력 기기를 처음 연결하면 '안 올린 변경'으로 본다 → 원격 파일이 있으면 덮지 않고
+      // (내용이 같으면 그대로 맞추고) 충돌로 묻는다. 기준본은 아직 없다
       app.sync = { repo, token, role, sha: null, dirty: role === 'writer' && !localEmpty, lastSyncAt: null, remoteUpdatedAt: null };
       app.status = null;
+      app.base = null;
       await persist();
       closeSheet();
       render();
@@ -351,6 +377,7 @@
     clearTimeout(pushTimer);
     app.sync = null;
     app.status = null;
+    app.base = null;
     persist();
     closeSheet();
     render();
@@ -379,7 +406,7 @@
         <div class="label">지금 통장 잔액</div>
         ${
           readOnly()
-            ? '<p class="note">PC에서 통장 잔액을 한 번 적어 두면, 여기에 지금 있는 돈이 계산돼서 보여요.</p>'
+            ? '<p class="note">입력 기기에서 통장 잔액을 한 번 적어 두면, 여기에 지금 있는 돈이 계산돼서 보여요.</p>'
             : `<p class="note">은행 앱에 보이는 잔액을 한 번 적어 두면, 그 뒤에 적는 수입·지출과 구독 결제를 더하고 빼서 지금 있는 돈을 보여 드려요.</p>
               <button class="btn primary block mt" data-action="balance">잔액 입력하기</button>`
         }
@@ -1044,13 +1071,13 @@
           <div class="actions"><button class="btn" data-action="sync-now">지금 동기화</button><button class="btn danger" data-action="sync-disconnect">연결 끊기</button></div>
         </section>`
       : `<section class="set"><h3>PC ↔ 폰 연결</h3>
-          <p class="note">PC에서 입력하고 폰에서 보려면 두 기기를 GitHub 비공개 저장소에 연결하세요. <button class="link" data-action="help" data-topic="sync">연결 방법</button></p>
+          <p class="note">PC와 폰을 GitHub 비공개 저장소에 연결하면 어느 기기에서 고쳐도 서로 맞춰져요. <button class="link" data-action="help" data-topic="sync">연결 방법</button></p>
           <div class="form mt">
             <label class="field"><span>저장소</span><input id="syncRepo" value="${esc(DEFAULT_REPO)}" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
             <label class="field"><span>토큰</span><input id="syncToken" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="github_pat_로 시작해요"></label>
             <div class="field"><span>이 기기는</span><div class="seg">
-              <label><input type="radio" name="syncRole" value="writer"${LOOKS_LIKE_PHONE ? '' : ' checked'}>입력(PC)</label>
-              <label><input type="radio" name="syncRole" value="reader"${LOOKS_LIKE_PHONE ? ' checked' : ''}>보기만(폰)</label>
+              <label><input type="radio" name="syncRole" value="writer" checked>입력·수정</label>
+              <label><input type="radio" name="syncRole" value="reader">보기만</label>
             </div></div>
             <p id="syncError" class="note warn" hidden></p>
             <button class="btn primary block" data-action="sync-connect">연결</button>
@@ -1062,7 +1089,7 @@
       ${syncHtml}
       <section class="set"><h3>내 데이터</h3>
         <p class="note">구독 ${s.subs.length}개 · 지출 ${s.expenses.length}건 · 수입 ${s.incomes.length}건 · 잔액 ${s.balance ? `${md(s.balance.date)}에 맞춤` : '안 맞춤'}</p>
-        <p class="note">${readOnly() ? '이 기기는 PC에서 올린 내용을 받아서 보여 줘요.' : '휴대폰을 바꾸거나 브라우저 데이터를 지우면 사라질 수 있으니 가끔 백업 파일을 만들어 두세요.'}</p>
+        <p class="note">${readOnly() ? '이 기기는 다른 기기에서 올린 내용을 받아서 보여 줘요.' : '휴대폰을 바꾸거나 브라우저 데이터를 지우면 사라질 수 있으니 가끔 백업 파일을 만들어 두세요.'}</p>
         <div class="actions"><button class="btn primary" data-action="backup">백업 파일 만들기</button>${readOnly() ? '' : '<button class="btn" data-action="restore">백업 불러오기</button>'}</div>
         <p class="note">${s.settings.lastBackupAt ? `마지막 백업: ${backupAgo(s.settings.lastBackupAt)}` : '아직 백업한 적이 없어요.'}</p>
       </section>
@@ -1132,18 +1159,18 @@
       'PC ↔ 폰 연결 방법',
       `<ol class="steps">
         <li><b>비공개 저장소 만들기</b>: github.com → New repository → 이름 <b>subscription-data</b> → <b>Private</b> → <b>Add a README file 체크</b> → Create repository</li>
-        <li><b>토큰 두 개 만들기</b>: 프로필 → Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token
+        <li><b>토큰 만들기</b>(PC용·폰용 따로): 프로필 → Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate new token
           <ul>
             <li>Repository access: Only select repositories → subscription-data</li>
             <li>Expiration: 고를 수 있는 <b>가장 긴 기간</b>(기본값이면 금방 만료돼요)</li>
-            <li>PC용: Repository permissions → Contents → <b>Read and write</b></li>
-            <li>폰용: Contents → <b>Read-only</b></li>
+            <li>Repository permissions → Contents → <b>Read and write</b>(폰에서 보기만 할 거면 폰용은 Read-only)</li>
           </ul></li>
-        <li><b>PC</b>: 이 앱 → 설정 → PC ↔ 폰 연결 → PC용 토큰 붙여 넣기 → 입력(PC) → 연결</li>
-        <li><b>폰</b>: 폰용 토큰을 PC 카카오톡 '나와의 채팅'으로 보내 복사 → 홈 화면의 구독달력 → 설정 → 붙여 넣기 → 보기만(폰) → 연결 → 카톡 메시지 지우기</li>
+        <li><b>PC</b>: 이 앱 → 설정 → PC ↔ 폰 연결 → PC용 토큰 붙여 넣기 → 입력·수정 → 연결</li>
+        <li><b>폰</b>: 폰용 토큰을 PC 카카오톡 '나와의 채팅'으로 보내 복사 → 홈 화면의 구독달력 → 설정 → 붙여 넣기 → 입력·수정 → 연결 → 카톡 메시지 지우기</li>
       </ol>
+      <p class="note">PC와 폰에서 따로 고쳐도 항목별로 합쳐져요. 같은 항목을 두 기기에서 동시에 고쳤을 때만, 나중에 맞춘 기기의 내용이 남아요.</p>
       <p class="note">폰에 이미 입력한 구독이 있으면, PC를 연결하기 전에 폰에서 백업 파일을 만들어 PC에서 불러오세요.</p>
-      <p class="note">토큰은 이 기기에만 저장되고 백업 파일에도 들어가지 않아요. 폰을 잃어버리면 GitHub에서 그 토큰만 지우면 돼요.</p>`,
+      <p class="note">토큰은 이 기기에만 저장되고 백업 파일에도 들어가지 않아요. 폰을 잃어버리면 GitHub에서 폰용 토큰만 지우면 돼요(Settings → Developer settings → Fine-grained tokens).</p>`,
     ],
     subs: [
       '구독 입력 요령',
@@ -1164,7 +1191,7 @@
         <li>맞춘 날 날짜로 적은 것은 <b>맞춘 뒤에 적은 것만</b> 넣어요. 그래서 오늘 이미 쓴 돈은 먼저 적고 나서 잔액을 맞추세요.</li>
         <li>구독은 결제일이 되면 자동으로 빠져요. 구독 결제는 따로 적지 마세요.</li>
         <li>앞으로의 날짜로 적은 것은 그날이 되면 계산에 들어가요.</li>
-        <li>은행 앱 잔액과 다르면 PC에서 <b>잔액 맞추기</b>로 다시 적으세요. 맞추기 화면에 앱이 계산한 값도 보여서, 빠뜨린 내역이 있는지 가늠할 수 있어요.</li>
+        <li>은행 앱 잔액과 다르면 <b>잔액 맞추기</b>로 다시 적으세요. 맞추기 화면에 앱이 계산한 값도 보여서, 빠뜨린 내역이 있는지 가늠할 수 있어요.</li>
       </ul>`,
     ],
     install: [
@@ -1193,7 +1220,7 @@
         <div class="label">그날 남는 돈</div>
         ${
           readOnly()
-            ? '<p class="note">PC에서 통장 잔액을 한 번 적어 두면, 날짜를 눌러 그날 남는 돈을 볼 수 있어요.</p>'
+            ? '<p class="note">입력 기기에서 통장 잔액을 한 번 적어 두면, 날짜를 눌러 그날 남는 돈을 볼 수 있어요.</p>'
             : `<p class="note">지금 통장 잔액을 먼저 적어 주세요. 그 잔액에서 앞으로의 구독 결제와 적어 둔 수입·지출을 더하고 빼서 그날 남는 돈을 계산해요.</p>
               <button class="btn primary block mt" data-action="balance">잔액 입력하기</button>`
         }
@@ -1390,7 +1417,8 @@
       app.conflictRemote = null;
       closeSheet();
       if (!r || !app.sync) return;
-      app.sync.sha = r.sha; // 원격 위에 이 PC 내용을 올린다
+      app.sync.sha = r.sha; // 원격 위에 이 기기 내용을 올린다
+      app.base = C.normalizeState(r.state);
       app.sync.dirty = true;
       persist();
       serial(pushOnce);
@@ -1547,11 +1575,14 @@
         app.state = C.normalizeState(raw);
         const sync = await DB.get('sync');
         app.sync = sync && sync.repo && sync.token ? sync : null;
+        const base = await DB.get('base');
+        app.base = app.sync && base ? C.normalizeState(base) : null;
         if (raw && raw.version !== C.STATE_VERSION) {
           // 옛 형식을 옮긴 내용을 저장해 둔다. 옛 앱(배포 전에 열어 둔 창 포함)이 받으면서 모르는 칸(수입·잔액)을
           // 버렸을 수 있으니, 원격이 그대로여도 한 번 다시 받는다(sha를 지우면 다음 동기화에서 받아온다).
           // 입력 기기에 안 올린 변경이 있으면 그대로 둔다(지우면 괜히 충돌로 묻게 된다)
           if (app.sync && (app.sync.role === 'reader' || !app.sync.dirty)) app.sync.sha = null;
+          app.base = null; // 옛 앱이 남긴 기준본은 믿지 않는다(받아오면 다시 생긴다)
           persist();
         }
       } catch (e) {

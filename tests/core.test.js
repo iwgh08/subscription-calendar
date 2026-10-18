@@ -320,3 +320,54 @@ test('빈 상태 판단', () => {
   assert.equal(Core.isEmptyState({ ...Core.emptyState(), events: [{ id: 'v', date: '2026-10-01', time: '', title: '일정', memo: '' }] }), false);
   assert.equal(Core.isEmptyState({ ...Core.emptyState(), balance: { amount: 0, date: '2026-10-01', setAt: '', paidToday: false } }), false);
 });
+
+// ---------- 두 기기 합치기 ----------
+const ev = (id, title, date = '2026-10-20') => ({ id, date, time: '', title, memo: '' });
+const st = (o) => Core.normalizeState({ ...Core.emptyState(), ...o });
+
+test('합치기: 양쪽에서 새로 적은 것은 모두 남는다', () => {
+  const base = st({ expenses: [exp({ id: 'a', date: '2026-10-01', amount: 1000 })] });
+  const local = st({ expenses: [...base.expenses, exp({ id: 'pc', date: '2026-10-02', amount: 2000 })] });
+  const remote = st({ expenses: [...base.expenses, exp({ id: 'ph', date: '2026-10-03', amount: 3000 })], events: [ev('e1', '치과')] });
+  const m = Core.mergeStates(base, local, remote, '2026-10-18T00:00:00.000Z');
+  assert.deepEqual(m.expenses.map((e) => e.id), ['a', 'ph', 'pc']);
+  assert.deepEqual(m.events.map((e) => e.id), ['e1']);
+  assert.equal(m.updatedAt, '2026-10-18T00:00:00.000Z');
+});
+
+test('합치기: 한쪽에서 지운 것은 지워지고, 지웠는데 다른 쪽이 고쳤으면 고친 것을 남긴다', () => {
+  const base = st({ events: [ev('x', '지울 것'), ev('y', '고칠 것')] });
+  const local = st({ events: [] }); // 이 기기에서 둘 다 지움
+  const remote = st({ events: [ev('x', '지울 것'), ev('y', '고쳤음')] });
+  assert.deepEqual(Core.mergeStates(base, local, remote).events.map((e) => e.title), ['고쳤음']);
+  // 반대로 원격에서 지운 것도 지워진다
+  assert.deepEqual(Core.mergeStates(base, base, st({ events: [ev('y', '고칠 것')] })).events.map((e) => e.id), ['y']);
+});
+
+test('합치기: 같은 항목을 둘 다 고치면 이 기기 것, 한쪽만 고치면 그쪽 것(칸 순서는 안 따짐)', () => {
+  const base = st({ subs: [sub({ id: 's', name: '넷플릭스', amount: 13500 })] });
+  const remoteEdit = st({ subs: [sub({ id: 's', name: '넷플릭스', amount: 17000 })] });
+  const reordered = st({ subs: [{ amount: 13500, day: 1, cycle: 'monthly', name: '넷플릭스', id: 's' }] });
+  assert.equal(Core.mergeStates(base, reordered, remoteEdit).subs[0].amount, 17000);
+  const localEdit = st({ subs: [sub({ id: 's', name: '넷플릭스', amount: 9000 })] });
+  assert.equal(Core.mergeStates(base, localEdit, remoteEdit).subs[0].amount, 9000);
+});
+
+test('합치기: 잔액은 바뀐 쪽, 둘 다 맞췄으면 나중에 맞춘 것. 백업 시각은 나중 것', () => {
+  const bal = (amount, setAt) => ({ amount, date: '2026-10-18', setAt, paidToday: false });
+  const base = st({ balance: bal(100, '2026-10-18T01:00:00.000Z') });
+  const l = st({ balance: bal(200, '2026-10-18T03:00:00.000Z'), settings: { lastBackupAt: '2026-10-10T00:00:00.000Z' } });
+  const r = st({ balance: bal(300, '2026-10-18T02:00:00.000Z'), settings: { lastBackupAt: '2026-10-12T00:00:00.000Z' } });
+  const m = Core.mergeStates(base, l, r);
+  assert.equal(m.balance.amount, 200);
+  assert.equal(m.settings.lastBackupAt, '2026-10-12T00:00:00.000Z');
+  assert.equal(Core.mergeStates(base, base, r).balance.amount, 300);
+  assert.equal(Core.mergeStates(base, base, st({ balance: null })).balance, null); // 저쪽에서 잔액 계산을 껐다
+});
+
+test('같은 데이터인지: 수정 시각·백업 시각은 따지지 않는다', () => {
+  const a = st({ events: [ev('e', '치과')], updatedAt: '2026-10-01T00:00:00.000Z' });
+  const b = st({ events: [ev('e', '치과')], updatedAt: '2026-10-18T00:00:00.000Z', settings: { lastBackupAt: '2026-10-18T00:00:00.000Z' } });
+  assert.equal(Core.sameData(a, b), true);
+  assert.equal(Core.sameData(a, st({ events: [ev('e', '안과')] })), false);
+});

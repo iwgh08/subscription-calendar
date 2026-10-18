@@ -288,6 +288,68 @@
     };
   }
 
+  // ---------- 두 기기 내용 합치기 ----------
+  // 칸 순서가 달라도 같은 값으로 본다
+  function canon(v) {
+    if (Array.isArray(v)) return v.map(canon);
+    if (v && typeof v === 'object') {
+      const o = {};
+      for (const k of Object.keys(v).sort()) o[k] = canon(v[k]);
+      return o;
+    }
+    return v;
+  }
+  const same = (a, b) => JSON.stringify(canon(a === undefined ? null : a)) === JSON.stringify(canon(b === undefined ? null : b));
+  const LISTS = ['subs', 'expenses', 'incomes', 'events'];
+
+  // 데이터 내용이 같은지(수정 시각·백업 시각은 따지지 않는다)
+  const sameData = (a, b) => LISTS.every((k) => same(a[k] || [], b[k] || [])) && same(a.balance, b.balance);
+
+  // 한 칸을 기준본(base) 대비로 합친다: 한쪽만 바뀌었으면 바뀐 쪽, 둘 다 바뀌었으면 tie(local, remote)
+  function mergeValue(b, l, r, tie) {
+    if (same(l, b)) return r;
+    if (same(r, b)) return l;
+    return tie(l, r);
+  }
+
+  // id별로 합친다. 새로 생긴 것은 양쪽 다 넣고, 한쪽에서 지웠는데 다른 쪽이 고쳤으면 고친 것을 남기고,
+  // 둘 다 고쳤으면 이 기기(local) 것을 남긴다. 순서는 원격 순서에 이 기기에서 새로 생긴 것을 뒤에 붙인다
+  function mergeList(base, local, remote) {
+    const byId = (list) => new Map((list || []).map((x) => [String(x.id), x]));
+    const B = byId(base);
+    const L = byId(local);
+    const R = byId(remote);
+    const out = [];
+    for (const id of new Set([...R.keys(), ...L.keys()])) {
+      const b = B.get(id);
+      const l = L.get(id);
+      const r = R.get(id);
+      let x;
+      if (!b) x = l || r;
+      else if (!l) x = same(r, b) ? null : r;
+      else if (!r) x = same(l, b) ? null : l;
+      else x = same(l, b) ? r : l;
+      if (x) out.push(x);
+    }
+    return out;
+  }
+
+  // 기준본 = 이 기기가 마지막으로 GitHub과 맞췄을 때의 내용. 그 뒤 이 기기(local)와 GitHub(remote)이 따로 바뀐 것을 합친다
+  function mergeStates(base, local, remote, nowIso) {
+    const B = normalizeState(base);
+    const L = normalizeState(local);
+    const R = normalizeState(remote);
+    const out = { ...L };
+    for (const k of LISTS) out[k] = mergeList(B[k], L[k], R[k]);
+    // 잔액을 양쪽에서 다시 맞췄으면 나중에 맞춘 것
+    out.balance = mergeValue(B.balance, L.balance, R.balance, (l, r) => (!l ? r : !r ? l : (l.setAt || '') >= (r.setAt || '') ? l : r));
+    const lb = L.settings.lastBackupAt || '';
+    const rb = R.settings.lastBackupAt || '';
+    out.settings = { lastBackupAt: (lb >= rb ? lb : rb) || null };
+    out.updatedAt = nowIso || new Date().toISOString();
+    return out;
+  }
+
   function makeBackup(state, now) {
     return { app: 'subcal', version: STATE_VERSION, exportedAt: (now || new Date()).toISOString(), state };
   }
@@ -307,6 +369,8 @@
     entriesInMonth, expensesInMonth, monthTotals, monthIncome, chargesBetween, balanceNow, balanceOn,
     // 일정
     eventsInMonth,
+    // 두 기기 합치기
+    sameData, mergeStates,
     // 저장
     STATE_VERSION, emptyState, isEmptyState, isNewerState, normalizeState, makeBackup, readBackup,
   };

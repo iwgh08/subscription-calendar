@@ -1,4 +1,4 @@
-/* PC ↔ 폰 연결: GitHub 비공개 저장소의 state.json 하나를 입력 기기(PC)가 쓰고, 보기 기기(폰)가 읽는다.
+/* PC ↔ 폰 연결: GitHub 비공개 저장소의 state.json 하나를 입력 기기(PC·폰)가 쓰고 읽는다. 보기 기기는 읽기만 한다.
  * DOM을 쓰지 않는다. 브라우저: 전역 Sync / Node: require('./sync.js') — 테스트는 가짜 fetch를 넣는다.
  * GitHub 응답은 60초 동안 캐시되므로 항상 cache: 'no-store'로 요청한다(폰에 옛 내용이 보이지 않게).
  */
@@ -126,6 +126,7 @@
   // 무엇을 할지 정한다: 'none' | 'push'(올리기) | 'pull'(받아오기) | 'conflict'(둘 다 바뀜) | 'missing'(원격에 아직 없음)
   //  보기 기기: 원격이 바뀌었으면 받아온다(보기 기기는 절대 올리지 않는다)
   //  입력 기기: 원격이 그대로면 바뀐 게 있을 때 올리고, 원격이 바뀌었으면 이 기기에 안 올린 변경이 없을 때만 받아온다
+  //  (둘 다 바뀐 'conflict'는 app.js가 기준본과 비교해 합친다)
   function decideSync({ role, remoteSha, lastSha, dirty, localEmpty }) {
     if (role === 'reader') {
       if (!remoteSha) return 'missing';

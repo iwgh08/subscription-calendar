@@ -1,6 +1,7 @@
 // 화면 점검: 헤드리스 Edge를 DevTools 프로토콜로 조종해 확인한다.
 //  1) 샘플 데이터 화면(아이폰 크기 390×844, 모바일 에뮬레이션): 탭·시트·다크 모드 캡처, 가로 넘침
 //  2) 가짜 GitHub(개발 서버 /__gh)로 PC(입력) ↔ 폰(보기) 연결: 연결, 빠른 입력(Enter), 받아오기, 오프라인, 충돌, 틀린 토큰
+//  3) PC·폰 둘 다 입력 기기: 따로 고친 내용이 묻지 않고 합쳐지는지
 //   npm start 를 켜 둔 상태에서: node tools/ui-check.js <캡처 저장 폴더>
 //   배포된 사이트는 1)만: BASE_URL=https://iwgh08.github.io/subscription-calendar node tools/ui-check.js <폴더>
 const { spawn } = require('child_process');
@@ -290,9 +291,9 @@ async function syncFlow() {
     await phone.click('[data-action="sync-connect"]');
     check('폰: 보기 기기로 연결해 받아옴', await phone.waitFor(`${text('#monthTotal')} === '52,400원'`), await phone.eval(text('#monthTotal')));
     check('폰: 잔액을 안 맞췄으면 "PC에서 적어 두면" 안내만', await phone.eval("!document.querySelector('#balanceHero') && !document.querySelector('[data-action=\"balance\"]')"));
-    check('폰: 이 기기 데이터를 바꾸기 전에 확인을 받음', phone.dialogs.some((d) => d.includes('PC에서 올린 내용으로 바꿀까요')), phone.dialogs.join(' | '));
+    check('폰: 이 기기 데이터를 바꾸기 전에 확인을 받음', phone.dialogs.some((d) => d.includes('GitHub에 올라온 내용으로 바꿀까요')), phone.dialogs.join(' | '));
     const bar = await phone.eval(text('#syncbar'));
-    check('폰: 상태 줄에 PC 수정 시각과 받아온 시각', bar.includes('PC 수정') && bar.includes('받아옴') && !bar.includes('PC 수정 -'), bar);
+    check('폰: 상태 줄에 수정 시각과 받아온 시각', bar.includes('수정 ') && bar.includes('받아옴') && !bar.includes('수정 -'), bar);
     await phone.shot('9-phone-home');
     await phone.tab('subs');
     check('폰: 구독 추가 버튼 없음', await phone.eval("!document.querySelector('[data-action=\"add-sub\"]')"));
@@ -392,17 +393,27 @@ async function syncFlow() {
     await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'off' });
     await phone.offline(false);
 
-    // ----- 충돌: 다른 곳에서 바뀐 뒤 PC에서 고치면 묻는다 -----
-    const other = { version: 2, subs: [], expenses: [{ id: 'z', date: `${ym}-05`, amount: 777, title: '다른 기기', memo: '' }], settings: { lastBackupAt: null }, updatedAt: new Date().toISOString() };
-    await fetch(`${BASE}/__gh/_file`, { method: 'POST', body: JSON.stringify(other) });
-    await pc.tab('spend'); // 다른 탭의 숨은 옛 입력 줄에 쓰지 않게(숨은 칸은 초점을 받지 못해 Enter가 헛돈다)
+    // ----- 충돌: 기준본(마지막으로 맞춘 내용)이 없는 PC는 자동으로 합칠 수 없으니 묻는다 -----
+    // 기준본을 지우고 GitHub이 끊긴 채로 다시 열어야 한다(열 때 원격 sha가 같으면 기준본을 다시 만든다)
+    await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'on' });
+    await pc.eval(`new Promise((res, rej) => {
+      const o = indexedDB.open('subcal', 1);
+      o.onerror = () => rej(o.error);
+      o.onsuccess = () => { const db = o.result; const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').delete('base'); tx.oncomplete = () => { db.close(); res(true); }; tx.onerror = () => rej(tx.error); };
+    })`);
+    await pc.goto(`${G}#spend`);
     await pc.fill('#quickAdd [name="amount"]', '1000');
     await pc.fill('#quickAdd [name="title"]', '커피');
     await pc.pressEnter('#quickAdd [name="title"]');
-    check('충돌: 시트로 어느 쪽을 남길지 물음', await pc.waitFor(`!document.querySelector('#sheet').hidden && ${text('#sheetTitle')}.includes('달라요')`, 10000), await pc.eval(text('#syncbar')));
+    const other = { version: 2, subs: [], expenses: [{ id: 'z', date: `${ym}-05`, amount: 777, title: '다른 기기', memo: '' }], settings: { lastBackupAt: null }, updatedAt: new Date().toISOString() };
+    await fetch(`${BASE}/__gh/_file`, { method: 'POST', body: JSON.stringify(other) });
+    await wait(1800); // 끊긴 사이 올리기는 실패한다
+    await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'off' });
+    await pc.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('충돌(기준본 없음): 시트로 어느 쪽을 남길지 물음', await pc.waitFor(`!document.querySelector('#sheet').hidden && ${text('#sheetTitle')}.includes('달라요')`, 10000), await pc.eval(text('#syncbar')));
     await pc.shot('11-pc-conflict');
     await pc.click('[data-action="conflict-local"]');
-    check('충돌: 이 PC 내용으로 덮어쓰면 저장됨', await saved());
+    check('충돌: 이 기기 내용으로 덮어쓰면 저장됨', await saved());
     r = await remote();
     check(
       '충돌: GitHub 내용 = PC 내용(지출 5건·수입 1건·잔액, 다른 기기 내용 없음)',
@@ -454,7 +465,8 @@ async function syncFlow() {
     await phone.shot('9-phone-plan');
     await phone.tab('home');
 
-    await fetch(`${BASE}/__gh/_file`, { method: 'POST', body: JSON.stringify({ ...r, version: 99 }) });
+    const latest = await remote();
+    await fetch(`${BASE}/__gh/_file`, { method: 'POST', body: JSON.stringify({ ...latest, version: 99 }) });
     await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
     check('새 버전 내용: 폰이 받지 않고 "새 버전" 경고', await phone.waitFor(`${text('#syncbar')}.includes('새 버전')`), await phone.eval(text('#syncbar')));
     check('새 버전 내용: 폰 화면은 마지막 내용 그대로', (await phone.eval(text('#balanceHero'))) === '124,000원', await phone.eval(text('#view-home')));
@@ -468,6 +480,59 @@ async function syncFlow() {
     await phone.click('[data-action="sync-connect"]');
     check('틀린 토큰: "HTTP 401" 오류를 보여 줌', await phone.waitFor(`${text('#syncError')}.includes('401')`), await phone.eval(text('#syncError')));
     await phone.shot('12-phone-bad-token');
+
+    // ----- PC·폰 둘 다 입력 기기: 따로 고친 내용은 묻지 않고 합쳐진다 -----
+    await fetch(`${BASE}/__gh/_file`, { method: 'POST', body: JSON.stringify(latest) }); // 새 버전 흉내를 되돌린다
+    await pc.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    await pc.waitFor("document.body.dataset.sync === 'ok'");
+    phone.dialogs.length = 0;
+    await phone.fill('#syncToken', 'test-rw');
+    await phone.eval("document.querySelector('input[name=\"syncRole\"][value=\"writer\"]').checked = true");
+    await phone.click('[data-action="sync-connect"]');
+    check('폰(입력 기기로 다시 연결): 내용이 같으면 묻지 않고 맞춤', await phone.waitFor("document.body.dataset.sync === 'ok'") && (await phone.eval("document.querySelector('#sheet').hidden")), `${await phone.eval(text('#syncbar'))} | ${await phone.eval(text('#sheetTitle'))}`);
+    const phoneSaved = () => phone.waitFor("document.body.dataset.sync === 'ok' && document.querySelector('#syncbar').innerText.includes('저장됨')", 10000);
+    const addPhoneEvent = async (day, title) => {
+      await phone.tab('calendar');
+      await phone.click(`.cal-cell[data-date="${ym}-${day}"]`);
+      await phone.click('#sheetBody [data-action="add-event"]');
+      await phone.eval(`(() => { const f = document.querySelector('#eventForm'); f.elements.title.value = ${JSON.stringify(title)}; f.requestSubmit(); })()`);
+      await phone.click('[data-action="close-sheet"]');
+    };
+    // 둘 다 GitHub이 끊긴 사이에 고친다 → PC가 먼저 올리고, 폰은 바뀐 GitHub과 자기 변경을 합쳐 올린다
+    await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'on' });
+    await pc.tab('spend');
+    await pc.fill('#quickAdd [name="amount"]', '1,111');
+    await pc.fill('#quickAdd [name="title"]', 'PC 지출');
+    await pc.pressEnter('#quickAdd [name="title"]');
+    await addPhoneEvent('12', '폰 일정');
+    await wait(1800);
+    await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'off' });
+    await pc.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('두 입력 기기: PC 변경 저장됨', await saved(), await pc.eval(text('#syncbar')));
+    await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('두 입력 기기: 폰이 묻지 않고 합쳐서 저장', (await phoneSaved()) && (await phone.eval("document.querySelector('#sheet').hidden")), `${await phone.eval(text('#syncbar'))} | ${await phone.eval(text('#sheetTitle'))}`);
+    r = await remote();
+    check('두 입력 기기: GitHub에 PC 지출과 폰 일정이 모두 있음', r.expenses.some((e) => e.title === 'PC 지출') && r.events.some((e) => e.title === '폰 일정'), JSON.stringify({ ex: r.expenses.map((e) => e.title), ev: r.events.map((e) => e.title) }));
+    check('두 입력 기기: 폰 화면에도 PC 지출', await phone.eval("(() => { location.hash = 'spend'; return true; })()") && (await phone.waitFor(`${text('#view-spend')}.includes('PC 지출')`)), await phone.eval(text('#view-spend')));
+    await pc.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    await pc.tab('calendar');
+    check('두 입력 기기: PC가 폰 일정을 받아옴', await pc.waitFor(`${text('#view-calendar')}.includes('폰 일정')`), await pc.eval(text('#view-calendar')));
+    await phone.shot('13-phone-writer-spend');
+
+    // 한쪽에서 지운 것은 다른 쪽이 따로 고친 게 있어도 되살아나지 않는다
+    await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'on' });
+    await pc.tab('spend');
+    await pc.eval("[...document.querySelectorAll('#view-spend [data-action=\"edit-exp\"]')].find((el) => el.innerText.includes('PC 지출')).click()");
+    await pc.click('[data-action="exp-delete"]');
+    await addPhoneEvent('13', '폰 일정 2');
+    await wait(1800);
+    await fetch(`${BASE}/__gh/_down`, { method: 'POST', body: 'off' });
+    await pc.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('지우기: PC 저장됨', await saved(), await pc.eval(text('#syncbar')));
+    await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('지우기: 폰이 합쳐서 저장', await phoneSaved(), await phone.eval(text('#syncbar')));
+    r = await remote();
+    check('지우기: PC에서 지운 지출은 없고, 폰 일정 2개는 있음', !r.expenses.some((e) => e.title === 'PC 지출') && r.events.filter((e) => e.title.startsWith('폰 일정')).length === 2, JSON.stringify({ ex: r.expenses.map((e) => e.title), ev: r.events.map((e) => e.title) }));
 
     check('PC: 콘솔 오류 없음', pc.errors.length === 0, pc.errors.slice(0, 3).join(' | '));
     check('폰: 콘솔 오류 없음', phone.errors.length === 0, phone.errors.slice(0, 3).join(' | '));
