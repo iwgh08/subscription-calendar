@@ -1,6 +1,6 @@
 /* 구독달력 서비스 워커: 앱 파일을 미리 저장해 두고(캐시 우선) 오프라인에서도 열리게 한다.
  * 앱 파일을 바꿔 배포할 때마다 CACHE 버전을 올려야 휴대폰에 새 파일이 들어간다. */
-const CACHE = 'subcal-v5';
+const CACHE = 'subcal-v6';
 const ASSETS = [
   './',
   './index.html',

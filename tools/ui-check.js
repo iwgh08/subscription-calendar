@@ -182,6 +182,18 @@ async function demoScreens() {
     check('달력: 날짜를 누르면 시트', await b.eval("!document.querySelector('#sheet').hidden"));
     await b.shot('3-day-sheet');
     await b.click('[data-action="close-sheet"]');
+    check('달력: 일정이 칸(네모 표시)과 달 목록에 보임', await b.eval("!!document.querySelector('.cal-cell .chip.ev') && document.querySelectorAll('#view-calendar [data-action=\"edit-event\"]').length === document.querySelectorAll('#view-calendar .chip.ev').length"));
+    await b.click('#view-calendar [data-action="add-event"]');
+    await b.fill('#eventForm [name="title"]', '샘플 일정');
+    await b.eval("document.querySelector('#eventForm').requestSubmit()");
+    check('달력: 일정 추가하면 달 목록에 생김', (await b.eval(text('#view-calendar'))).includes('샘플 일정'));
+    await b.click('.cal-cell .chip.ev');
+    check('달력: 일정 있는 날 시트에 일정·추가 버튼', (await b.eval(text('#sheetBody'))).includes('일정') && (await b.eval("!!document.querySelector('#sheetBody [data-action=\"add-event\"]')")));
+    await b.shot('3-day-sheet-event');
+    await b.click('#sheetBody [data-action="edit-event"]');
+    check('달력: 그날 시트에서 일정을 누르면 수정 시트', (await b.eval(text('#sheetTitle'))) === '일정 수정');
+    await b.shot('3-event-form');
+    await b.click('[data-action="close-sheet"]');
     await b.tab('subs');
     await b.click('[data-action="add-sub"]');
     await b.shot('4-sub-form');
@@ -325,6 +337,30 @@ async function syncFlow() {
     check('폰: 같은 잔액(125,000원)', await phone.waitFor(`${text('#balanceHero')} === '125,000원'`), await phone.eval(text('#view-home')));
     check('폰: "잔액 맞추기" 버튼 없음', await phone.eval("!document.querySelector('[data-action=\"balance\"]')"));
     await phone.shot('9-phone-home-balance');
+
+    // ----- 일정: PC에서 그날 시트로 추가 → 폰 달력에 보이고, 폰에는 추가·수정 버튼이 없다. 돈 계산은 그대로 -----
+    await pc.tab('calendar');
+    await pc.click(`.cal-cell[data-date="${ym}-11"]`);
+    await pc.click('#sheetBody [data-action="add-event"]');
+    check('일정: 그날 시트에서 열면 날짜가 그날', (await pc.eval("document.querySelector('#eventForm').elements.date.value")) === `${ym}-11`);
+    await pc.eval("(() => { const f = document.querySelector('#eventForm'); f.elements.time.value = '14:30'; f.elements.title.value = '<b>치과</b>'; f.requestSubmit(); })()");
+    check('일정: 저장하면 그날 시트로 돌아와 목록에 보임(글자 그대로)', (await pc.eval(text('#sheetBody'))).includes('<b>치과</b>') && (await pc.eval(text('#sheetBody'))).includes('14:30'), await pc.eval(text('#sheetBody')));
+    await pc.click('[data-action="close-sheet"]');
+    check('일정: 달력 칸에 표시', await pc.eval(`!!document.querySelector('.cal-cell[data-date="${ym}-11"] .chip.ev')`));
+    check('PC: 일정 저장됨', await saved(), await pc.eval(text('#syncbar')));
+    r = await remote();
+    check('가짜 저장소: 일정 1건(시간 14:30)', r.version === 4 && r.events.length === 1 && r.events[0].time === '14:30', JSON.stringify(r.events));
+    await pc.tab('home');
+    check('일정은 돈 계산에 안 들어감(잔액 125,000원·총 지출 67,400원)', (await pc.eval(text('#balanceHero'))) === '125,000원' && (await pc.eval(text('#monthTotal'))) === '67,400원');
+    await phone.tab('calendar');
+    await phone.eval("document.dispatchEvent(new Event('visibilitychange'))");
+    check('폰: 달력에 PC가 적은 일정', await phone.waitFor(`${text('#view-calendar')}.includes('<b>치과</b>')`), await phone.eval(text('#view-calendar')));
+    check('폰: 일정 추가·수정 버튼 없음', await phone.eval("!document.querySelector('[data-action=\"add-event\"]') && !document.querySelector('[data-action=\"edit-event\"]')"));
+    await phone.click(`.cal-cell[data-date="${ym}-11"]`);
+    check('폰: 그날 시트에 일정은 보이고 추가 버튼은 없음', (await phone.eval(text('#sheetBody'))).includes('<b>치과</b>') && (await phone.eval("!document.querySelector('#sheetBody [data-action=\"add-event\"]')")));
+    await phone.shot('9-phone-day-event');
+    await phone.click('[data-action="close-sheet"]');
+    check('폰: 달력 탭 가로 넘침 없음', await phone.eval(noOverflow));
 
     // ----- 옛 앱(수입·잔액을 모름)이 받아 저장해 둔 폰: 새 앱으로 열면 원격이 그대로여도 다시 받는다 -----
     await phone.eval(`new Promise((res, rej) => {

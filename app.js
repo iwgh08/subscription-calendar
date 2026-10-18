@@ -555,10 +555,16 @@
 
   function renderCalendar() {
     const charges = C.chargesInMonth(app.state.subs, app.y, app.m);
+    const events = C.eventsInMonth(app.state.events, app.y, app.m);
     const byDate = new Map();
     for (const c of charges) {
       if (!byDate.has(c.date)) byDate.set(c.date, []);
       byDate.get(c.date).push(c);
+    }
+    const evByDate = new Map();
+    for (const e of events) {
+      if (!evByDate.has(e.date)) evByDate.set(e.date, []);
+      evByDate.get(e.date).push(e);
     }
     let cells = '';
     for (const week of C.calendarWeeks(app.y, app.m)) {
@@ -568,21 +574,28 @@
           return;
         }
         const list = byDate.get(date) || [];
+        const evs = evByDate.get(date) || [];
         const total = sum(list, (c) => c.sub.amount);
-        const cls = ['cal-cell', i === 0 ? 'sun' : i === 6 ? 'sat' : '', list.length ? 'has' : '', date === app.today ? 'today' : ''].filter(Boolean).join(' ');
-        const chips = list
-          .slice(0, 2)
-          .map((c) => `<span class="chip"><i class="dot c${colorOf(c.sub)}"></i>${esc(short(c.sub.name))}</span>`)
-          .join('');
-        const more = list.length > 2 ? `<span class="more">+${list.length - 2}</span>` : '';
-        const label = `${longDate(date)}${list.length ? `, 구독 ${list.length}건 ${won(total)}` : ''}`;
-        cells += `<button class="${cls}" data-action="day" data-date="${date}" aria-label="${esc(label)}"><span class="num">${Number(date.slice(8))}</span>${chips}${more}${total ? `<span class="amt">${cellAmount(total)}</span>` : ''}</button>`;
+        const cls = ['cal-cell', i === 0 ? 'sun' : i === 6 ? 'sat' : '', list.length || evs.length ? 'has' : '', date === app.today ? 'today' : ''].filter(Boolean).join(' ');
+        // 칸에는 두 줄까지: 일정(네모 표시)을 먼저, 그다음 구독(색 점)
+        const chips = [
+          ...evs.map((e) => `<span class="chip ev"><i class="ev-mark"></i><span class="t">${esc(e.title)}</span></span>`),
+          ...list.map((c) => `<span class="chip"><i class="dot c${colorOf(c.sub)}"></i>${esc(short(c.sub.name))}</span>`),
+        ];
+        const more = chips.length > 2 ? `<span class="more">+${chips.length - 2}</span>` : '';
+        const label = [longDate(date), evs.length ? `일정 ${evs.length}건` : '', list.length ? `구독 ${list.length}건 ${won(total)}` : ''].filter(Boolean).join(', ');
+        cells += `<button class="${cls}" data-action="day" data-date="${date}" aria-label="${esc(label)}"><span class="num">${Number(date.slice(8))}</span>${chips.slice(0, 2).join('')}${more}${total ? `<span class="amt">${cellAmount(total)}</span>` : ''}</button>`;
       });
     }
     $('#view-calendar').innerHTML = `
       <section class="card tight">
         <div class="cal-week" aria-hidden="true">${WEEK.map((w, i) => `<span class="${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</span>`).join('')}</div>
         <div class="cal-grid">${cells}</div>
+      </section>
+      <section class="card">
+        <h2 class="card-title">${app.m}월 일정 <small>${events.length}건</small></h2>
+        ${events.length ? `<ul class="list">${events.map((e) => eventLine(e)).join('')}</ul>` : `<p class="empty">이 달에는 적어 둔 일정이 없어요.</p>`}
+        ${readOnly() ? '' : '<button class="btn block mt" data-action="add-event">+ 일정 추가</button>'}
       </section>
       <section class="card">
         <h2 class="card-title">${app.m}월 구독 결제 <small>${charges.length}건 · ${won(sum(charges, (c) => c.sub.amount))}</small></h2>
@@ -611,6 +624,10 @@
       <div class="grow"><div class="name">${esc(e.title || (inc ? '수입' : '지출'))}${inc ? ' <span class="badge">수입</span>' : ''}</div>${e.memo ? `<div class="sub">${esc(e.memo)}</div>` : ''}</div>
       <span class="amt${inc ? ' plus' : ''}">${inc ? '+' : '-'}${won(e.amount)}</span>${rowClose()}</li>`;
 
+  // 일정 한 줄. withDate: 달 목록에서는 날짜도 보여 준다(그날 시트에서는 뺀다)
+  const eventLine = (e, withDate = true) => `<li>${rowOpen('edit-event', e.id)}<i class="ev-mark"></i>
+      <div class="grow"><div class="name">${esc(e.title)}</div><div class="sub">${[withDate ? mdw(e.date) : '', e.time || '하루 종일', esc(e.memo)].filter(Boolean).join(' · ')}</div></div>${rowClose()}</li>`;
+
   // 지출·수입 고르기(빠른 입력 줄과 수정 시트)
   const kindSeg = (inc) => `<div class="seg" role="radiogroup" aria-label="종류">
       <label><input type="radio" name="kind" value="out"${inc ? '' : ' checked'}>지출</label>
@@ -637,12 +654,15 @@
       .sort(byRecent);
     const spent = sum(charges, (c) => c.sub.amount) + sum(entries.filter((x) => !x.inc), (x) => x.e.amount);
     const income = sum(entries.filter((x) => x.inc), (x) => x.e.amount);
+    const events = C.eventsInMonth(app.state.events, p.y, p.m).filter((e) => e.date === date);
     openSheet(
       longDate(date),
-      `<h3>구독 결제</h3>${charges.length ? `<ul class="list">${charges.map(subChargeLine).join('')}</ul>` : '<p class="empty">이날 결제할 구독이 없어요.</p>'}
+      `<h3>일정</h3>${events.length ? `<ul class="list">${events.map((e) => eventLine(e, false)).join('')}</ul>` : '<p class="empty">이날 적어 둔 일정이 없어요.</p>'}
+      ${readOnly() ? '' : `<button class="btn block mt" data-action="add-event" data-date="${date}">+ 이날 일정 추가</button>`}
+      <h3 class="mt">구독 결제</h3>${charges.length ? `<ul class="list">${charges.map(subChargeLine).join('')}</ul>` : '<p class="empty">이날 결제할 구독이 없어요.</p>'}
       <h3 class="mt">직접 적은 지출·수입</h3>${entries.length ? `<ul class="list">${entries.map(entryLine).join('')}</ul>` : '<p class="empty">이날 적은 내역이 없어요.</p>'}
       <p class="note">이날 지출 ${won(spent)}${income ? ` · 수입 +${won(income)}` : ''}</p>`,
-      { kind: 'day', refresh: () => openDay(date) },
+      { kind: 'day', date, refresh: () => openDay(date) },
     );
   }
 
@@ -894,6 +914,63 @@
     app.state[key] = app.state[key].filter((x) => x !== f.e);
     closeSheet();
     commit(`${f.inc ? '수입' : '지출'}을 지웠어요.`);
+  }
+
+  // ----- 일정 -----
+  // back: 그날 시트에서 열었으면 그 날짜(저장·삭제 뒤 그날 시트로 돌아간다)
+  function openEvent(id, date, back) {
+    if (readOnly()) return;
+    const e = id ? app.state.events.find((x) => x.id === id) : null;
+    if (id && !e) return;
+    const d = e ? e.date : C.isYmd(date) ? date : app.today;
+    openSheet(
+      e ? '일정 수정' : '일정 추가',
+      `<form id="eventForm" class="form" data-id="${esc(e ? e.id : '')}" data-back="${esc(back || '')}" autocomplete="off" novalidate>
+        <label class="field"><span>날짜</span><input type="date" name="date" value="${esc(d)}"></label>
+        <label class="field"><span>시간 <small>(비우면 하루 종일)</small></span><input type="time" name="time" value="${esc(e ? e.time : '')}"></label>
+        <label class="field"><span>내용</span><input name="title" maxlength="40" placeholder="예: 치과" value="${esc(e ? e.title : '')}"></label>
+        <label class="field"><span>메모</span><input name="memo" maxlength="80" value="${esc(e ? e.memo : '')}"></label>
+        <div class="actions"><button class="btn primary" type="submit">저장</button>${e ? '<button type="button" class="btn danger" data-action="event-delete">삭제</button>' : ''}</div>
+      </form>`,
+      { kind: 'event' },
+    );
+    if (!e) $('#eventForm').elements.title.focus();
+  }
+
+  function saveEvent(form) {
+    const fd = new FormData(form);
+    const date = String(fd.get('date') || '');
+    const time = String(fd.get('time') || '').slice(0, 5);
+    const title = String(fd.get('title') || '').trim();
+    if (!C.isYmd(date)) return toast('날짜를 골라 주세요.');
+    if (!title) {
+      form.elements.title.focus();
+      return toast('내용을 적어 주세요.');
+    }
+    const fields = { date, time: /^\d{2}:\d{2}$/.test(time) ? time : '', title, memo: String(fd.get('memo') || '').trim() };
+    const id = form.dataset.id;
+    if (id) {
+      const e = app.state.events.find((x) => x.id === id);
+      if (!e) return closeSheet();
+      Object.assign(e, fields);
+    } else app.state.events.push({ id: uid(), ...fields, createdAt: new Date().toISOString() });
+    afterEvent(form.dataset.back, date);
+    commit(id ? '일정을 고쳤어요.' : '일정을 추가했어요.');
+  }
+
+  function deleteEvent() {
+    const form = $('#eventForm');
+    const e = form && app.state.events.find((x) => x.id === form.dataset.id);
+    if (!e || !confirm(`'${e.title}' 일정을 지울까요?`)) return;
+    app.state.events = app.state.events.filter((x) => x !== e);
+    afterEvent(form.dataset.back, form.dataset.back);
+    commit('일정을 지웠어요.');
+  }
+
+  // 그날 시트에서 열었으면 (날짜를 바꿨으면 바꾼 날의) 그날 시트로 돌아가고, 아니면 닫는다
+  function afterEvent(back, date) {
+    if (back && C.isYmd(date)) openDay(date);
+    else closeSheet();
   }
 
   // ----- 통장 잔액 맞추기 -----
@@ -1282,6 +1359,9 @@
     'edit-exp': (el) => openEntry(el.dataset.id),
     'edit-inc': (el) => openEntry(el.dataset.id),
     'exp-delete': deleteEntry,
+    'add-event': (el) => openEvent(null, el.dataset.date, el.dataset.date),
+    'edit-event': (el) => openEvent(el.dataset.id, null, app.sheet && app.sheet.kind === 'day' ? app.sheet.date : ''),
+    'event-delete': deleteEvent,
     balance: openBalance,
     'balance-clear': clearBalance,
     backup: doBackup,
@@ -1386,6 +1466,7 @@
     else if (id === 'expForm') saveEntry(e.target);
     else if (id === 'quickAdd') quickAdd(e.target);
     else if (id === 'balForm') saveBalance(e.target);
+    else if (id === 'eventForm') saveEvent(e.target);
   });
 
   const viewFromHash = () => {

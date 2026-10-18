@@ -27,7 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     - 테스트 도우미: `POST /__gh/_reset`, `GET·POST /__gh/_file`, `POST /__gh/_down`(on/off — 연결 끊김 흉내)
 - `node tools/ui-check.js <폴더>`: `npm start`를 켠 상태에서 헤드리스 Edge를 DevTools 프로토콜로 조종한다(PASS/FAIL 출력).
   - 샘플 화면: 390×844 모바일 에뮬레이션, 다크 모드
-  - PC(1024px)와 폰(390px) 브라우저 두 개로: 연결 → 빠른 입력(Enter) → 폰이 받아옴 → 화면 복귀 시 갱신 → 잔액 맞추기·수입 → 옛 형식 저장본 다시 받기 → 오프라인 → 충돌 → 계산 탭(내일 남는 돈·써 볼 지출·지출로 적기) → 새 버전 내용 거부 → 틀린 토큰
+  - PC(1024px)와 폰(390px) 브라우저 두 개로: 연결 → 빠른 입력(Enter) → 폰이 받아옴 → 화면 복귀 시 갱신 → 잔액 맞추기·수입 → 일정 추가(폰 달력에 보임) → 옛 형식 저장본 다시 받기 → 오프라인 → 충돌 → 계산 탭(내일 남는 돈·써 볼 지출·지출로 적기) → 새 버전 내용 거부 → 틀린 토큰
   - 화면이나 동기화를 바꾸면 돌린다.
   - `BASE_URL=https://iwgh08.github.io/subscription-calendar`를 주면 배포된 사이트의 샘플 화면만 점검한다.
 - `node tools/shot.js "/?demo=1#calendar" out.png [폭] [높이] [light|dark]`: 화면 한 장 캡처. 헤드리스 Edge는 창 폭이 약 500px 아래로 줄지 않아서 iframe에 넣어 찍는다.
@@ -57,9 +57,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `normalizeState`: 저장본·백업·GitHub에서 받은 내용을 읽을 때 모두 거친다. **여기서 고르지 않는 칸은 버려진다.** 칸을 새로 만들면 여기, `emptyState`, `isEmptyState`에 넣고 `STATE_VERSION`을 올린다.
   - v1(통장 불러오기 시절): 직접 입력한 거래(`source: 'manual'`)만 `expenses`·`incomes`로 옮긴다. 불러온 통장 거래, 제외 규칙, `payKey`, `matchKey`는 버린다(구독료가 두 번 계산되기 때문이다).
   - v2 → v3: `incomes: []`, `balance: null`을 채운다.
+  - v3 → v4: `events: []`를 채운다. 날짜가 틀린 일정은 버리고, 이름이 비면 '일정', 시간은 `HH:MM`이 아니면 ''.
 - `isNewerState`: 이 앱보다 새 버전이 저장한 내용이면 받지 않는다(받으면 모르는 칸이 사라진다). 그런 백업도 `readBackup`이 거부한다.
-- state v3: `{ version: 3, subs, expenses, incomes, balance, settings: { lastBackupAt }, updatedAt }`
+- `eventsInMonth`: 그 달 일정을 날짜 → 시간 순으로(시간 없는 것이 그날 먼저). **일정은 금액이 없고 돈 계산(총 지출·잔액·계산 탭)에 넣지 않는다.**
+- state v4: `{ version: 4, subs, expenses, incomes, events, balance, settings: { lastBackupAt }, updatedAt }`
   - `expenses`·`incomes`: `[{ id, date, amount, title, memo, createdAt? }]` — `createdAt`은 적은 시각(ISO)
+  - `events`: `[{ id, date, time, title, memo, createdAt? }]` — `time`은 'HH:MM' 또는 ''(하루 종일)
   - `balance`: `{ amount, date, setAt, paidToday } | null` — 0원도 된다
 
 **`sync.js` — GitHub 연결(UMD, DOM 금지).**
@@ -88,6 +91,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 내역 탭(주소는 `#spend` 그대로): 구독 결제(자동)·지출·수입을 날짜별로 보여 준다. 같은 날은 최근에 적은 것(`createdAt`)이 위다.
   - 빠른 입력 줄의 지출·수입 고르기는 다시 그려질 때 '지출'로 돌아온다. 수입으로 잘못 들어가지 않게 하기 위해서다.
   - 수정 시트(`#expForm`)에서 종류를 바꾸면 다른 목록으로 옮긴다.
+- 달력 탭: 칸에는 일정(테두리 네모 `.ev-mark`)을 먼저, 구독(색 점)을 다음으로 두 줄까지 보여 주고 나머지는 `+N`. 구독 팔레트를 건드리지 않게 일정은 모양으로 구분한다. 아래에 그 달 일정 목록.
+  - 그날 시트(`openDay`) 맨 위가 일정이다. 입력 기기에서는 "이날 일정 추가"(`add-event`)와 줄 누르기(`edit-event`)로 일정 시트(`#eventForm`)를 연다. 그날 시트에서 연 일정 시트는 저장·삭제 뒤 그날 시트로 돌아간다.
 - 계산 탭(`#plan`): 달력에서 오늘 이후 날짜를 누르면 그날 끝에 남는 돈(`#planResult`)을 보여 준다.
   - 써 볼 지출(`app.plans`)은 메모리에만 두고 저장·연결하지 않는다. 그래서 보기 기기에서도 더할 수 있다(`#planAdd`는 submit의 읽기 전용 검사보다 먼저 처리).
   - 입력 기기에서만 줄마다 "지출로 적기"(`plan-commit`)로 실제 지출에 넣는다.

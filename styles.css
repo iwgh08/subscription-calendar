@@ -370,6 +370,15 @@ main {
   border-radius: 50%;
   background: var(--c);
 }
+/* 일정 표시: 구독 색 점과 모양으로 구분한다(테두리만 있는 네모, 색은 글자색) */
+.ev-mark {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--ink-2);
+  border-radius: 2px;
+}
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -530,6 +539,17 @@ main {
   font-size: 10.5px;
   line-height: 1.25;
   white-space: nowrap;
+}
+.chip .ev-mark {
+  width: 7px;
+  height: 7px;
+  border-width: 1.5px;
+  border-radius: 1.5px;
+}
+.chip.ev .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
 }
 .chip .dot {
   width: 6px;
@@ -953,6 +973,9 @@ details.more .field + .field {
 .sheet h3 {
   margin: 0 0 8px;
   font-size: 15px;
+}
+.sheet h3.mt {
+  margin-top: 20px;
 }
 @keyframes sheet-up {
   from {

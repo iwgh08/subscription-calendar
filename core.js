@@ -135,6 +135,13 @@
     return list.filter((e) => e.date.startsWith(prefix)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   }
   const expensesInMonth = entriesInMonth;
+
+  // 일정: 그 달의 것을 날짜 → 시간 순으로(시간 없는 것이 그날 맨 앞). 돈 계산에는 넣지 않는다
+  const eventKey = (e) => `${e.date} ${e.time || ''}`;
+  function eventsInMonth(events, y, m) {
+    const prefix = monthKey(y, m);
+    return (events || []).filter((e) => e.date.startsWith(prefix)).sort((a, b) => (eventKey(a) < eventKey(b) ? -1 : eventKey(a) > eventKey(b) ? 1 : 0));
+  }
   const sumAmount = (list) => list.reduce((a, e) => a + (Number(e.amount) || 0), 0);
 
   // 그 달 합계: subs = 구독료(결제일 기준, 그 달 전체), other = 직접 입력한 지출, total = 둘의 합
@@ -212,14 +219,14 @@
 
   // ---------- 저장 상태 / 백업 ----------
   // 저장 형식 버전. 칸을 새로 만들면 올린다(옛 앱은 모르는 칸을 버리므로, 받은 쪽에서 다시 받게 하는 데 쓴다)
-  const STATE_VERSION = 3;
+  const STATE_VERSION = 4;
 
   function emptyState() {
-    return { version: STATE_VERSION, subs: [], expenses: [], incomes: [], balance: null, settings: { lastBackupAt: null }, updatedAt: null };
+    return { version: STATE_VERSION, subs: [], expenses: [], incomes: [], events: [], balance: null, settings: { lastBackupAt: null }, updatedAt: null };
   }
 
   const isEmptyState = (s) =>
-    !s || (!(s.subs && s.subs.length) && !(s.expenses && s.expenses.length) && !(s.incomes && s.incomes.length) && !s.balance);
+    !s || (!(s.subs && s.subs.length) && !(s.expenses && s.expenses.length) && !(s.incomes && s.incomes.length) && !(s.events && s.events.length) && !s.balance);
 
   // 이 앱보다 새 버전이 저장한 내용인지(그대로 읽으면 모르는 칸이 사라진다)
   const isNewerState = (s) => !!s && typeof s === 'object' && Number(s.version) > STATE_VERSION;
@@ -236,6 +243,15 @@
     return out;
   }
 
+  // 일정 { id, date, time('HH:MM' 또는 ''), title, memo, createdAt? }. 날짜가 틀리면 버리고, 이름이 비면 '일정'
+  function cleanEvent(e) {
+    if (!e || typeof e !== 'object' || !isYmd(e.date)) return null;
+    const time = typeof e.time === 'string' && /^\d{2}:\d{2}$/.test(e.time) ? e.time : '';
+    const out = { id: String(e.id), date: e.date, time, title: String(e.title || '').trim() || '일정', memo: String(e.memo || '') };
+    if (typeof e.createdAt === 'string' && e.createdAt) out.createdAt = e.createdAt;
+    return out;
+  }
+
   function cleanBalance(b) {
     if (!b || typeof b !== 'object' || !isYmd(b.date) || b.amount === null || b.amount === '') return null;
     const amount = Number(b.amount);
@@ -246,6 +262,7 @@
   // 저장본·백업·GitHub에서 받은 내용을 읽을 때 빠진 칸을 채우고 옛 형식을 옮긴다. 여기 없는 칸은 버려진다.
   // v1: 직접 입력한 거래만 지출·수입으로 옮기고, 불러온 통장 거래는 버린다(구독료가 두 번 계산되므로). 제외 규칙도 버린다.
   // v2 → v3: 수입(incomes)과 잔액(balance) 칸이 생겼다
+  // v3 → v4: 일정(events) 칸이 생겼다
   function normalizeState(s) {
     const base = emptyState();
     if (!s || typeof s !== 'object') return base;
@@ -264,6 +281,7 @@
       subs: Array.isArray(s.subs) ? s.subs.filter((x) => x && typeof x === 'object').map(cleanSub) : [],
       expenses,
       incomes,
+      events: Array.isArray(s.events) ? s.events.map(cleanEvent).filter(Boolean) : [],
       balance: cleanBalance(s.balance),
       settings: { lastBackupAt: typeof st.lastBackupAt === 'string' ? st.lastBackupAt : null },
       updatedAt: typeof s.updatedAt === 'string' ? s.updatedAt : null,
@@ -287,6 +305,8 @@
     chargeDate, chargesInMonth, subscriptionTotal, monthProgress, upcoming, nextChargeDate, monthlyEquivalent,
     // 지출·수입·잔액
     entriesInMonth, expensesInMonth, monthTotals, monthIncome, chargesBetween, balanceNow, balanceOn,
+    // 일정
+    eventsInMonth,
     // 저장
     STATE_VERSION, emptyState, isEmptyState, isNewerState, normalizeState, makeBackup, readBackup,
   };

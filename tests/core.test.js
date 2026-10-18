@@ -222,15 +222,61 @@ test('v2 저장본: 지출은 그대로, 수입은 빈 목록, 잔액은 없음�
   assert.deepEqual(s.subs, v2.subs);
   assert.deepEqual(s.expenses, v2.expenses);
   assert.deepEqual(s.incomes, []);
+  assert.deepEqual(s.events, []);
   assert.equal(s.balance, null);
   assert.equal(s.updatedAt, v2.updatedAt);
 });
 
-test('수입·잔액·적은 시각은 백업을 거쳐도 남고(0원 잔액 포함), 잘못된 잔액은 버린다', () => {
+test('v3 저장본: 일정은 빈 목록으로 채우고 나머지는 그대로', () => {
+  const v3 = {
+    version: 3,
+    subs: [sub({ id: 's1' })],
+    expenses: [{ id: 'e1', date: '2026-10-02', amount: 5000, title: '점심', memo: '' }],
+    incomes: [{ id: 'i1', date: '2026-10-01', amount: 300000, title: '용돈', memo: '' }],
+    balance: { amount: 1000, date: '2026-10-01', setAt: '', paidToday: false },
+    settings: { lastBackupAt: null },
+    updatedAt: '2026-10-15T00:00:00.000Z',
+  };
+  const s = Core.normalizeState(v3);
+  assert.equal(s.version, 4);
+  assert.deepEqual(s.events, []);
+  assert.deepEqual({ ...s, events: undefined, version: 3 }, { ...v3, events: undefined });
+});
+
+test('일정: 날짜가 틀리면 버리고, 이름이 비면 "일정", 시간은 HH:MM만 남긴다', () => {
+  const s = Core.normalizeState({
+    events: [
+      { id: 1, date: '2026-10-20', time: '14:30', title: ' 치과 ', memo: '' },
+      { id: 2, date: '10/20', title: '틀린 날짜' },
+      { id: 3, date: '2026-10-21', time: '2시', title: '' },
+      null,
+    ],
+  });
+  assert.deepEqual(s.events, [
+    { id: '1', date: '2026-10-20', time: '14:30', title: '치과', memo: '' },
+    { id: '3', date: '2026-10-21', time: '', title: '일정', memo: '' },
+  ]);
+});
+
+test('일정: 그 달 것만 날짜·시간 순(시간 없는 것이 그날 먼저), 돈 계산에는 안 들어감', () => {
+  const events = [
+    { id: 'a', date: '2026-10-20', time: '15:00', title: 'B' },
+    { id: 'b', date: '2026-11-01', time: '', title: '다음 달' },
+    { id: 'c', date: '2026-10-20', time: '', title: '종일' },
+    { id: 'd', date: '2026-10-05', time: '09:00', title: 'A' },
+  ];
+  assert.deepEqual(Core.eventsInMonth(events, 2026, 10).map((e) => e.id), ['d', 'c', 'a']);
+  const state = { ...Core.emptyState(), events, balance: { amount: 1000, date: '2026-10-01', setAt: '', paidToday: false } };
+  assert.equal(Core.balanceNow(state, '2026-10-25').total, 1000);
+  assert.equal(Core.monthTotals([], [], 2026, 10).total, 0);
+});
+
+test('수입·잔액·일정·적은 시각은 백업을 거쳐도 남고(0원 잔액 포함), 잘못된 잔액은 버린다', () => {
   const state = {
     ...Core.emptyState(),
     expenses: [exp({ id: 'e1', date: '2026-10-15', amount: 5000, createdAt: '2026-10-15T06:00:00.000Z' })],
     incomes: [exp({ id: 'i1', date: '2026-10-15', amount: 300000, title: '용돈', createdAt: '2026-10-15T07:00:00.000Z' })],
+    events: [{ id: 'v1', date: '2026-10-20', time: '14:30', title: '치과', memo: '스케일링', createdAt: '2026-10-15T08:00:00.000Z' }],
     balance: { amount: 0, date: '2026-10-15', setAt: '2026-10-15T05:00:00.000Z', paidToday: true },
     updatedAt: '2026-10-15T07:00:00.000Z',
   };
@@ -271,5 +317,6 @@ test('빈 상태 판단', () => {
   assert.equal(Core.isEmptyState({ ...Core.emptyState(), expenses: [exp({ date: '2026-10-01', amount: 1 })] }), false);
   // 수입만 있거나 잔액만 맞춰 둔 PC도 비어 있지 않다(비었다고 보면 연결할 때 GitHub 내용으로 덮인다)
   assert.equal(Core.isEmptyState({ ...Core.emptyState(), incomes: [exp({ date: '2026-10-01', amount: 1 })] }), false);
+  assert.equal(Core.isEmptyState({ ...Core.emptyState(), events: [{ id: 'v', date: '2026-10-01', time: '', title: '일정', memo: '' }] }), false);
   assert.equal(Core.isEmptyState({ ...Core.emptyState(), balance: { amount: 0, date: '2026-10-01', setAt: '', paidToday: false } }), false);
 });
