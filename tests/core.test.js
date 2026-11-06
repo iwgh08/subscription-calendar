@@ -439,3 +439,33 @@ test('위젯 요약: 잔액·이번 달 총 지출, 결제는 내일부터·일�
   const withBal = { ...state, balance: { amount: 100000, date: '2026-10-17', setAt: '', paidToday: true } };
   assert.equal(Core.widgetSummary(withBal, '2026-10-18').balance, 100000 - 13500); // 오늘 결제는 이미 빠졌다
 });
+
+test('위젯 달력: 이번 달 칸마다 일정 수·구독 색(이름순)·그날 구독료. 지출은 넣지 않는다', () => {
+  const state = {
+    ...Core.emptyState(),
+    subs: [
+      sub({ id: 's1', name: '멜론', amount: 10900, day: 18, color: 5 }),
+      sub({ id: 's2', name: '넷플릭스', amount: 13500, day: 18, color: 2 }),
+      sub({ id: 's3', name: '연간', amount: 50000, cycle: 'yearly', month: 3, day: 5 }),
+      sub({ id: 's4', name: '말일', amount: 1000, day: 31 }),
+    ],
+    expenses: [exp({ date: '2026-10-18', amount: 7000 })],
+    events: [
+      { id: 'e1', date: '2026-10-18', time: '15:00', repeat: '', title: '치과' },
+      { id: 'e2', date: '1990-10-03', time: '', repeat: 'yearly', title: '생일' },
+      { id: 'e3', date: '2026-11-01', time: '', repeat: '', title: '다음 달' },
+    ],
+  };
+  const w = Core.widgetSummary(state, '2026-10-18');
+  assert.equal(w.today, '2026-10-18');
+  assert.equal(w.year, 2026);
+  assert.equal(w.weeks.length, 5);
+  assert.deepEqual(w.weeks[0].map((c) => c && c.day), [null, null, null, null, 1, 2, 3]); // 2026년 10월 1일은 목요일
+  const days = w.weeks.flat().filter(Boolean);
+  assert.equal(days.length, 31);
+  assert.deepEqual(days[17], { date: '2026-10-18', day: 18, events: 1, colors: [2, 5], amount: 24400 }); // 넷플릭스, 멜론 순
+  assert.deepEqual(days[2], { date: '2026-10-03', day: 3, events: 1, colors: [], amount: 0 }); // 매년 일정
+  assert.deepEqual(days[4], { date: '2026-10-05', day: 5, events: 0, colors: [], amount: 0 }); // 매년 구독은 3월에만
+  assert.deepEqual(days[30].colors, [undefined]); // 색을 안 고른 구독(위젯이 0번 색으로 그린다)
+  assert.equal(Core.widgetSummary(state, '2026-11-02').weeks.flat().filter((c) => c && c.events).length, 1); // 다음 달은 다음 달 달력에
+});

@@ -1220,7 +1220,7 @@
     ],
     widget: [
       '아이폰 위젯 만들기',
-      `<p>무료 앱 <b>Scriptable</b>로 홈 화면에 지금 잔액·이번 달 총 지출·7일 안의 결제와 일정을 띄워요. 아이폰은 홈 화면에 추가한 웹 앱에 위젯을 허락하지 않아서 이 방법을 써요.</p>
+      `<p>무료 앱 <b>Scriptable</b>로 홈 화면에 지금 잔액·이번 달 총 지출·7일 안의 결제와 일정을 띄워요. 중간·큰 위젯에는 이번 달 달력(일정은 네모, 구독은 색 점)도 나와요. 아이폰은 홈 화면에 추가한 웹 앱에 위젯을 허락하지 않아서 이 방법을 써요.</p>
       <ol class="steps">
         <li>App Store에서 <b>Scriptable</b>을 설치합니다.</li>
         <li>GitHub에서 <b>위젯용 토큰</b>을 새로 만듭니다: Fine-grained tokens → Generate new token → Only select repositories → subscription-data → Contents <b>Read-only</b></li>
