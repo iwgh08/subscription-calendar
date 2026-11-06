@@ -242,7 +242,24 @@
     return out; // 달 순서대로 모았고 달 안에서는 eventsInMonth가 날짜·시간 순으로 정렬했다
   }
 
-  // 아이폰 위젯(Scriptable)에 보여 줄 요약: 지금 잔액, 이번 달 총 지출, 7일 안의 결제(내일부터)·일정(오늘부터) 최대 4개
+  // 위젯 달력: 이번 달을 일요일부터 시작하는 주 배열로. 칸은 null(앞뒤 빈칸) 또는
+  // { date, day, events(일정 수), colors(그날 구독의 color 값, 이름순), amount(그날 구독료 합) }. 앱 달력 탭과 같은 내용이다
+  function monthCalendar(state, y, m) {
+    const byDate = new Map();
+    const cell = (date) => {
+      if (!byDate.has(date)) byDate.set(date, { date, day: parseYmd(date).d, events: 0, colors: [], amount: 0 });
+      return byDate.get(date);
+    };
+    for (const e of eventsInMonth(state.events, y, m)) cell(e.date).events += 1;
+    for (const c of chargesInMonth(state.subs, y, m)) {
+      const x = cell(c.date);
+      x.colors.push(c.sub.color);
+      x.amount += Number(c.sub.amount) || 0;
+    }
+    return calendarWeeks(y, m).map((week) => week.map((date) => (date ? byDate.get(date) || cell(date) : null)));
+  }
+
+  // 아이폰 위젯(Scriptable)에 보여 줄 요약: 지금 잔액, 이번 달 총 지출, 7일 안의 결제(내일부터)·일정(오늘부터) 최대 4개, 이번 달 달력
   function widgetSummary(state, today) {
     const s = normalizeState(state);
     const t = parseYmd(today);
@@ -252,7 +269,18 @@
       ...upcoming(s.subs, today, 7).map((c) => ({ kind: 'sub', date: c.date, dday: c.dday, time: '', title: String(c.sub.name || ''), amount: Number(c.sub.amount) || 0 })),
       ...upcomingEvents(s.events, today, 7).map((e) => ({ kind: 'event', date: e.date, dday: e.dday, time: e.time, title: e.title })),
     ].sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.time !== b.time ? (a.time < b.time ? -1 : 1) : 0));
-    return { balance: now ? now.total : null, month: t.m, monthTotal: totals.total, monthSubs: totals.subs, monthOther: totals.other, items: items.slice(0, 4), more: Math.max(0, items.length - 4) };
+    return {
+      balance: now ? now.total : null,
+      today,
+      year: t.y,
+      month: t.m,
+      monthTotal: totals.total,
+      monthSubs: totals.subs,
+      monthOther: totals.other,
+      items: items.slice(0, 4),
+      more: Math.max(0, items.length - 4),
+      weeks: monthCalendar(s, t.y, t.m),
+    };
   }
 
   // ---------- 저장 상태 / 백업 ----------
@@ -409,7 +437,7 @@
     // 일정
     eventsInMonth, upcomingEvents,
     // 위젯
-    widgetSummary,
+    monthCalendar, widgetSummary,
     // 두 기기 합치기
     sameData, mergeStates,
     // 저장

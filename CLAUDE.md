@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 명령어
 
-- `npm test`: `tests/*.test.js`를 `node --test`로 돌린다. `widget.test.js`는 가짜 Scriptable 전역으로 위젯 파일을 그대로 돌리고, 위젯 파일이 다시 만든 것과 같은지 확인한다. `core.test.js`는 계산, 옛 형식 옮기기, 두 기기 합치기, `sync.test.js`는 가짜 fetch로 GitHub 요청·오류·`decideSync`를 확인한다.
+- `npm test`: `tests/*.test.js`를 `node --test`로 돌린다. `widget.test.js`는 가짜 Scriptable 전역으로 위젯 파일을 그대로 돌리고(가짜가 묶음 구조를 기록해서 달력 칸·표시까지 본다), 위젯 파일이 다시 만든 것과 같은지 확인한다. `core.test.js`는 계산, 옛 형식 옮기기, 두 기기 합치기, `sync.test.js`는 가짜 fetch로 GitHub 요청·오류·`decideSync`를 확인한다.
 - `npm start`: http://localhost:8080 개발 서버(`tools/serve.js`, 의존성 없음).
   - 앱 파일 확장자만 내보내고 `.git` 같은 숨김 경로는 막는다.
   - **가짜 GitHub API(`/__gh/...`)가 들어 있다.** 메모리에만 저장하고, 이 개발 서버에만 있다.
@@ -66,7 +66,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - 잔액도 같은 규칙이고, 둘 다 맞췄으면 `setAt`이 나중인 것을 쓴다. 백업 시각은 나중 것.
   - 값 비교는 칸 순서를 무시한다(`canon`). `sameData`는 수정 시각·설정을 빼고 데이터가 같은지 본다.
 - `upcomingEvents(events, today, days)`: 오늘부터 days일 뒤까지의 일정(매년 일정 포함)에 `dday`를 붙인다. 홈 "다가오는 일정 7일" 카드와 위젯이 쓴다.
-- `widgetSummary(state, today)`: 위젯용 요약 `{ balance, month, monthTotal, monthSubs, monthOther, items(최대 4), more }`. items는 7일 안의 결제(내일부터)와 일정(오늘부터)이다.
+- `widgetSummary(state, today)`: 위젯용 요약 `{ balance, today, year, month, monthTotal, monthSubs, monthOther, items(최대 4), more, weeks }`. items는 7일 안의 결제(내일부터)와 일정(오늘부터)이다.
+  - `weeks`는 `monthCalendar(state, y, m)`로 만든 이번 달 달력이다. 칸은 null(앞뒤 빈칸) 또는 `{ date, day, events(일정 수), colors(그날 구독의 color 값, 이름순), amount(그날 구독료 합) }`. 앱 달력 탭과 같은 내용이고, 지출은 넣지 않는다.
 - `isNewerState`: 이 앱보다 새 버전이 저장한 내용이면 받지 않는다(받으면 모르는 칸이 사라진다). 그런 백업도 `readBackup`이 거부한다.
 - `eventsInMonth`: 그 달 일정을 날짜 → 시간 순으로(시간 없는 것이 그날 먼저). 매년 일정은 처음 날짜의 해부터 해마다 같은 월·일에 나오고(2월 29일은 평년에 28일), 돌려줄 때 `date`는 그해 날짜, `start`는 처음 날짜다. 고칠 때는 id로 원래 일정을 찾는다. **일정은 금액이 없고 돈 계산(총 지출·잔액·계산 탭)에 넣지 않는다.**
 - state v5: `{ version: 5, subs, expenses, incomes, events, balance, settings: { lastBackupAt }, updatedAt }`
@@ -123,6 +124,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - **실행 중에 다른 곳의 코드를 받아 돌리지 않는다**(토큰을 가진 채 공개 저장소의 바뀐 코드가 돌지 않게).
   - 그래서 폰에 붙여 넣은 위젯은 스스로 바뀌지 않는다. 위젯이 "새로 복사해 주세요"를 띄우는 건 `STATE_VERSION`이 오를 때뿐이다. **`core.js`의 계산 규칙(잔액·합계·다가오는 결제)을 바꾸면 배포 안내에 "위젯 스크립트 복사를 다시 눌러 붙여 넣기"를 넣는다.**
   - 잠금 화면(`accessory…`) 위젯은 잔액 한 줄만 그린다.
+  - 작은 위젯은 잔액·총 지출이다. 중간 위젯은 왼쪽에 작은 달력(숫자·표시만, 한 칸에 표시 3개까지), 오른쪽에 잔액·총 지출·다가오는 것 2개와 "+N개 더"를 둔다. 큰 위젯은 위에 잔액·총 지출, 아래에 달력(표시 4개, 넘치면 3개 + `+N`, 그날 구독료)을 둔다.
+  - 달력 표시는 앱과 같다. 일정은 테두리 네모, 구독은 `--cat-0~7` 색 점(`colorOf`는 app.js와 같은 규칙), 오늘은 `--s1` 테두리, 표시가 있는 날은 `--surface-2` 배경이다.
+  - 위젯 크기는 폰마다 달라서, 칸은 폭만 고정하고 높이는 위아래 늘어나는 빈칸으로 위젯 높이를 나눠 채운다. 여백은 6주짜리 달이 가장 작은 위젯(아이폰 SE: 중간 321×148, 큰 321×324pt)에 들어가게 잡았다. 여백을 늘리면 그 크기에서 맨 아래 줄이 잘린다.
 - 앱 도움말의 "위젯 스크립트 복사"(`copy-widget`)는 `widget/subcal-widget.js`를 받아 클립보드에 넣는다. 아이폰은 누른 순간 복사를 시작해야 해서 Promise를 넘기는 `ClipboardItem`을 쓴다. 위젯 파일은 앱이 쓰지 않으므로 `sw.js`의 `ASSETS`에 넣지 않는다.
 
 **`sw.js` — 서비스 워커.**
