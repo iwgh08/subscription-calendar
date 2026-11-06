@@ -23,7 +23,8 @@ const contentOf = (state) => {
 };
 
 // 가짜 Scriptable. reply: { status, body } 또는 'offline'. alerts: presentAlert가 돌려줄 [고른 번호, 입력값]
-async function runWidget({ token = 'tok', reply, cache = null, runsInApp = false, alerts = [], family = 'medium' } = {}) {
+// screen: 화면 크기(세로, pt). date: 'YYYY-MM-DD'를 주면 그날 14:30으로 시계를 고정한다
+async function runWidget({ token = 'tok', reply, cache = null, runsInApp = false, alerts = [], family = 'medium', screen = [390, 844], date = null } = {}) {
   const texts = [];
   const keychain = new Map(token ? [['subcal-widget-token', token]] : []);
   const files = new Map(cache ? [['/docs/subcal-widget-cache.json', JSON.stringify(cache)]] : []);
@@ -60,7 +61,9 @@ async function runWidget({ token = 'tok', reply, cache = null, runsInApp = false
       this.children = [];
       Object.assign(this, container(this));
     }
-    setPadding() {}
+    setPadding(...p) {
+      this.padding = p;
+    }
     async presentMedium() {
       presented = true;
     }
@@ -136,9 +139,22 @@ async function runWidget({ token = 'tok', reply, cache = null, runsInApp = false
       setWidget: (w) => (widget = w),
       complete() {},
     },
+    Device: { screenSize: () => ({ width: screen[0], height: screen[1] }), isPad: () => false },
     config: { runsInWidget: !runsInApp, runsInApp, widgetFamily: family },
     module: { exports: {} }, // Scriptable에도 module 전역이 있다
   };
+  if (date) {
+    const [y, m, d] = date.split('-').map(Number);
+    const fixed = new Date(y, m - 1, d, 14, 30).getTime();
+    sandbox.Date = class extends Date {
+      constructor(...a) {
+        super(...(a.length ? a : [fixed]));
+      }
+      static now() {
+        return fixed;
+      }
+    };
+  }
   await vm.runInNewContext(`(async () => {\n${code}\n})()`, sandbox);
   const all = texts.map((t) => t.text).join(' | ');
   return { all, widget, presented, keychain, files, requests };
@@ -219,7 +235,7 @@ test('위젯: 중간 위젯은 왼쪽에 작은 달력, 오른쪽에 잔액·총
   const state = sampleState({ events: [ev(today, '치과', '14:30'), ev(Core.addDays(today, 1), 'A'), ev(Core.addDays(today, 2), 'B'), ev(Core.addDays(today, 3), 'C')] });
   const r = await runWidget({ family: 'medium', reply: ok(state) });
   assert.equal(dayCells(r.widget).length, monthWeeks().length * 7);
-  assert.equal(dayCells(r.widget)[0].size.width, 20);
+  assert.ok(dayCells(r.widget).every((c) => c.size.width === dayCells(r.widget)[0].size.width && c.size.height > 0), '칸 크기는 모두 같다');
   assert.match(r.all, /지금 통장 잔액 \| 123,456원 \| \d+월 총 지출 0원 \| 오늘 \| □ 치과 14:30 \| 내일 \| □ A \| \+2개 더 \| 받아옴 /);
   assert.doesNotMatch(r.all, /□ B/);
 });
@@ -229,6 +245,60 @@ test('위젯: 작은 위젯은 잔액·총 지출만(달력·목록 없음)', as
   assert.equal(dayCells(r.widget).length, 0);
   assert.match(r.all, /^지금 통장 잔액 \| 123,456원 \| \d+월 총 지출 0원 \| 받아옴 /);
   assert.doesNotMatch(r.all, /치과/);
+});
+
+// Scriptable(SwiftUI)이 줄일 수 있는 가장 작은 크기 어림. 길이 없는 빈칸은 최소 8pt, 글자 한 줄은 크기의 1.25배,
+// 글자 폭은 한글 1배·그 외 0.6배(줄일 수 있는 글자는 그만큼 줄인다). 실제 아이폰에서 칸 안 빈칸 때문에 숫자가 잘렸던 일을 막는다
+const fontSize = (f) => Number(String(f).replace(/^[a-z]+/, ''));
+const textW = (t) => [...t.text].reduce((a, ch) => a + (/[가-힣]/.test(ch) ? 1 : 0.6), 0) * fontSize(t.font) * (t.minimumScaleFactor || 1);
+function minSize(n, parentLayout) {
+  if (n.type === 'text') return { w: textW(n), h: fontSize(n.font) * 1.25 };
+  if (n.type === 'spacer') {
+    const len = n.len == null ? 8 : n.len;
+    return parentLayout === 'h' ? { w: len, h: 0 } : { w: 0, h: len };
+  }
+  const layout = n.type === 'widget' ? 'v' : n.layout;
+  const kids = n.children.map((c) => minSize(c, layout));
+  const gaps = (n.spacing || 0) * Math.max(0, kids.length - 1);
+  const sum = (k) => kids.reduce((a, x) => a + x[k], 0) + gaps;
+  const max = (k) => kids.reduce((a, x) => Math.max(a, x[k]), 0);
+  const [pt, pr, pb, pl] = n.padding || [0, 0, 0, 0];
+  let w = (layout === 'h' ? sum('w') : max('w')) + pl + pr;
+  let h = (layout === 'v' ? sum('h') : max('h')) + pt + pb;
+  if (n.size && n.size.width > 0) w = n.size.width;
+  if (n.size && n.size.height > 0) h = n.size.height;
+  return { w, h, inner: { w: (layout === 'h' ? sum('w') : max('w')), h: (layout === 'v' ? sum('h') : max('h')) } };
+}
+
+test('위젯: 달력이 위젯 안에 들어간다(SE부터 Pro Max까지, 6주짜리 달, 칸 안 숫자·금액까지)', async () => {
+  // [화면, 중간 위젯, 큰 위젯] — Apple 표의 위젯 크기(pt)
+  const sizes = [
+    [[375, 667], [321, 148], [321, 324]],
+    [[390, 844], [338, 158], [338, 354]],
+    [[430, 932], [364, 170], [364, 382]],
+  ];
+  const day = (d) => ({ id: `s${d}`, name: `구독${d}`, amount: 29000 + d, cycle: 'monthly', day: d, color: d % 8 });
+  const state = sampleState({ subs: [1, 2, 3, 15, 30, 31].map(day), events: [ev('2026-05-30', '일정'), ev('2026-05-31', '일정2')] });
+  for (const [screen, medium, large] of sizes) {
+    for (const [family, [width, height]] of [['medium', medium], ['large', large]]) {
+      const r = await runWidget({ family, screen, date: '2026-05-30', reply: ok(state) });
+      const label = `${family} ${screen.join('x')}`;
+      const cells = dayCells(r.widget);
+      assert.equal(cells.length, 6 * 7, `${label}: 2026년 5월은 6주`);
+      const total = minSize(r.widget, 'v');
+      assert.ok(total.h <= height + 0.01, `${label}: 높이 ${total.h.toFixed(1)} > ${height}`);
+      assert.ok(total.w <= width + 0.01, `${label}: 폭 ${total.w.toFixed(1)} > ${width}`);
+      for (const c of cells) {
+        const m = minSize(c, 'h').inner;
+        assert.ok(m.h <= c.size.height + 0.01, `${label}: 칸 높이 ${m.h.toFixed(1)} > ${c.size.height}`);
+        for (const line of c.children.filter((x) => x.type === 'stack')) {
+          const lw = minSize(line, 'v').inner.w;
+          assert.ok(lw <= line.size.width + 0.01, `${label}: 칸 안 ${textsIn(line).join(' ')} 폭 ${lw.toFixed(1)} > ${line.size.width}`);
+        }
+      }
+      if (family === 'large') assert.ok(r.all.includes('29,031'), `${label}: 그날 구독료가 칸에 나온다`);
+    }
+  }
 });
 
 test('위젯: 잠금 화면(accessory)에서는 잔액 한 줄만', async () => {
