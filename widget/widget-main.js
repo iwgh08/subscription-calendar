@@ -118,18 +118,54 @@ function addLine(parent, str, font, textColor, opts = {}) {
   return t;
 }
 
-// 가로 줄 하나. align: 'center'(양쪽에 늘어나는 빈칸, 끝나면 endRow) | 'right'(왼쪽에만) | 'left'
-function addRow(parent, align = 'left', height = 0) {
+// Scriptable(SwiftUI)의 길이 없는 빈칸(addSpacer())은 0까지 줄지 않고 최소 약 8pt를 차지한다.
+// 그래서 좁은 달력 칸 안에서는 쓰지 않는다. 크기를 정한 묶음이 내용을 가운데에 놓는 것으로 가운데 정렬한다.
+const SPACER_MIN = 8;
+// 글자 한 줄 높이 어림(SF·Apple SD 고딕은 글자 크기의 약 1.2배). 칸 높이 계산이 넘치지 않게 넉넉히 잡는다
+const lineH = (size) => size * 1.25;
+
+// 위젯 크기(pt). Scriptable은 위젯 크기를 알려 주지 않아서, 화면 높이(세로, pt)로 Apple 표에서 고른다.
+// 홈 화면을 '큰 아이콘'으로 쓰면 위젯이 이보다 조금 크다. 그때는 남는 높이를 맨 아래 빈칸이 맡는다(넘치지는 않는다).
+const WIDGET_SIZES = [
+  // [화면 높이 이상, 위젯 폭, 중간 높이, 큰 높이]
+  [926, 364, 170, 382], // Pro Max·Plus
+  [896, 360, 169, 379], // XR·11·11 Pro Max
+  [844, 338, 158, 354], // 12~16·Pro
+  [780, 329, 155, 345], // X·XS·11 Pro·mini
+  [736, 348, 157, 357], // 6~8 Plus
+  [0, 321, 148, 324], // SE. 아이패드도 가장 작은 크기로 잡는다
+];
+function widgetSize(family) {
+  let h = 844;
+  let pad = false;
+  try {
+    const sc = Device.screenSize();
+    h = Math.max(sc.width, sc.height);
+    pad = Device.isPad();
+  } catch (e) {
+    // Device가 없으면 흔한 크기로
+  }
+  const row = (!pad && WIDGET_SIZES.find(([min]) => h >= min)) || WIDGET_SIZES[WIDGET_SIZES.length - 1];
+  return { width: row[1], height: family === 'large' ? row[3] : row[2] };
+}
+
+// 크기를 정한 가로 묶음: 내용이 가운데에 놓인다(height 0이면 내용 높이)
+function addBox(parent, width, height = 0) {
+  const b = parent.addStack();
+  b.layoutHorizontally();
+  b.centerAlignContent();
+  b.size = new Size(width, height);
+  return b;
+}
+
+// 가로 줄(위젯 폭을 쓰는 줄. 좁은 칸 안에서는 쓰지 않는다). right면 왼쪽 빈칸으로 오른쪽에 붙인다
+function addRow(parent, right = false) {
   const r = parent.addStack();
   r.layoutHorizontally();
   r.centerAlignContent();
-  if (height) r.size = new Size(0, height);
-  if (align !== 'left') r.addSpacer();
+  if (right) r.addSpacer();
   return r;
 }
-const endRow = (r, align) => {
-  if (align !== 'right') r.addSpacer();
-};
 
 function addFooter(parent, view, size) {
   if (view.error) addLine(parent, `⚠ 받아오지 못함 · ${when(view.fetchedAt)}`, Font.mediumSystemFont(size), COLORS.bad, { scale: 0.7 });
@@ -166,11 +202,11 @@ function addMark(parent, cat, size) {
   }
 }
 
-// 달력 칸 하나. 폭은 고정, 높이는 위아래 빈칸이 늘어나 위젯 높이를 주별로 나눠 채운다(폰마다 위젯 크기가 달라서).
-// 날짜 숫자, 표시 줄, (큰 위젯이면) 그날 구독료. 줄 높이를 고정해서 숫자 위치가 칸마다 같다
+// 달력 칸 하나(고정 크기 o.cw × o.ch). 줄마다 칸 폭의 묶음에 넣어 가운데에 놓는다.
+// 날짜 숫자, 표시 줄, (o.amount가 있으면) 그날 구독료. 표시·금액 줄은 비어도 높이를 지켜서 숫자 위치가 칸마다 같다
 function addDay(row, cell, col, today, o) {
   const c = row.addStack();
-  c.size = new Size(o.cw, 0);
+  c.size = new Size(o.cw, o.ch);
   c.layoutVertically();
   c.cornerRadius = o.radius;
   if (!cell) return;
@@ -180,54 +216,59 @@ function addDay(row, cell, col, today, o) {
     c.borderWidth = o.ring;
     c.borderColor = COLORS.today;
   }
-  c.addSpacer();
-  const n = addRow(c, 'center');
+  const n = addBox(c, o.cw);
   addLine(n, String(cell.day), cell.date === today ? Font.boldSystemFont(o.num) : Font.semiboldSystemFont(o.num), col === 0 ? COLORS.sun : col === 6 ? COLORS.sat : COLORS.ink);
-  endRow(n, 'center');
   c.addSpacer(o.gap);
-  const m = addRow(c, 'center', o.mark);
+  const m = addBox(c, o.cw, o.mark);
   m.spacing = o.markGap;
   // 칸이 좁아서 o.marks개까지. 넘치면 큰 위젯은 하나를 줄이고 +N, 중간 위젯은 +N 글자가 들어갈 자리가 없어서 그냥 자른다
   const shown = marks.length <= o.marks ? marks : marks.slice(0, o.more ? o.marks - 1 : o.marks);
   for (const k of shown) addMark(m, k, o.mark);
   if (o.more && shown.length < marks.length) addLine(m, `+${marks.length - shown.length}`, Font.semiboldSystemFont(o.mark + 2), COLORS.ink2);
-  endRow(m, 'center');
   if (o.amount) {
     c.addSpacer(o.gap);
-    const a = addRow(c, 'center', o.amount + 2);
+    const a = addBox(c, o.cw, lineH(o.amount));
     if (cell.amount) addLine(a, cellAmount(cell.amount), Font.mediumSystemFont(o.amount), COLORS.ink2, { scale: 0.7 });
-    endRow(a, 'center');
   }
-  c.addSpacer();
 }
 
-// 이번 달 달력. 칸 폭은 고정이고, o.colGap이 없으면 칸 사이 빈칸이 늘어나 위젯 폭을 채운다
+// 칸 안 내용의 높이(addDay와 같은 순서): 숫자, 빈칸, 표시, (빈칸, 금액)
+const dayContentH = (o) => lineH(o.num) + o.gap + o.mark + (o.amount ? o.gap + lineH(o.amount) : 0);
+
+// 이번 달 달력: 요일 줄 + 주마다 줄. 칸과 칸 사이(o.colGap)·줄 사이(o.rowGap)는 고정 길이
 function addCalendar(parent, s, o) {
   const grid = parent.addStack();
   grid.layoutVertically();
-  const gapCol = (r) => (o.colGap ? r.addSpacer(o.colGap) : r.addSpacer());
-  const head = addRow(grid);
+  const head = grid.addStack();
+  head.layoutHorizontally();
   WEEK.forEach((name, i) => {
-    if (i) gapCol(head);
-    const h = head.addStack();
-    h.size = new Size(o.cw, 0);
-    h.addSpacer();
+    if (i) head.addSpacer(o.colGap);
+    const h = addBox(head, o.cw);
     addLine(h, name, Font.mediumSystemFont(o.head), i === 0 ? COLORS.sun : i === 6 ? COLORS.sat : COLORS.ink2);
-    h.addSpacer();
   });
   for (const week of s.weeks) {
     grid.addSpacer(o.rowGap);
-    const r = addRow(grid);
+    const r = grid.addStack();
+    r.layoutHorizontally();
     week.forEach((cell, i) => {
-      if (i) gapCol(r);
+      if (i) r.addSpacer(o.colGap);
       addDay(r, cell, i, s.today, o);
     });
   }
 }
 
+// 칸 크기: 폭은 주어진 폭을 7칸으로, 높이는 주어진 높이를 주 수로 나눈다
+function fitCalendar(o, width, height, weeks) {
+  const cw = Math.floor((width - 6 * o.colGap) / 7);
+  const ch = Math.floor((height - lineH(o.head)) / weeks - o.rowGap);
+  return { ...o, cw, ch, colGap: (width - 7 * cw) / 6 };
+}
+
 // 큰 위젯: 위에 잔액·이번 달 총 지출, 아래에 이번 달 달력(칸마다 일정 네모·구독 색 점·그날 구독료)
 function buildLarge(w, s, view) {
-  w.setPadding(12, 14, 10, 14);
+  const pad = [12, 14, 10, 14];
+  w.setPadding(...pad);
+  const size = widgetSize('large');
   const top = addRow(w);
   top.topAlignContent();
   const left = top.addStack();
@@ -237,24 +278,34 @@ function buildLarge(w, s, view) {
   top.addSpacer();
   const right = top.addStack();
   right.layoutVertically();
-  const r1 = addRow(right, 'right');
-  addLine(r1, `${s.month}월 총 지출`, Font.mediumSystemFont(11), COLORS.ink2);
-  const r2 = addRow(right, 'right');
-  addLine(r2, won(s.monthTotal), Font.semiboldSystemFont(15), COLORS.ink, { scale: 0.6 });
+  addLine(addRow(right, true), `${s.month}월 총 지출`, Font.mediumSystemFont(11), COLORS.ink2);
+  addLine(addRow(right, true), won(s.monthTotal), Font.semiboldSystemFont(15), COLORS.ink, { scale: 0.6 });
   w.addSpacer(6);
-  // 여백은 6주짜리 달이 가장 작은 큰 위젯(아이폰 SE, 321×324pt)에도 들어가게 잡았다
-  addCalendar(w, s, { cw: 38, radius: 8, ring: 1.5, num: 12, head: 10, mark: 6, markGap: 2, marks: 4, more: true, gap: 2, amount: 8.5, rowGap: 2 });
-  w.addSpacer(4);
+  // 달력 높이 = 위젯 안쪽 높이 − 머리(두 줄) − 빈칸 6 − 맨 아래 빈칸(최소 8) − 받아옴 줄 − 여유 4
+  const innerW = size.width - pad[1] - pad[3];
+  const calH = size.height - pad[0] - pad[2] - (lineH(11) + lineH(22)) - 6 - SPACER_MIN - lineH(9.5) - 4;
+  const base = { radius: 8, ring: 1.5, num: 12, head: 10, mark: 6, markGap: 2, marks: 4, more: true, gap: 2, amount: 8.5, rowGap: 2, colGap: 3 };
+  let o = fitCalendar(base, innerW, calH, s.weeks.length);
+  // 작은 위젯의 6주짜리 달: 칸 안 빈칸을 줄이고, 그래도 안 들어가면 금액을 뺀다
+  if (o.ch < dayContentH(o)) o = { ...o, gap: 1 };
+  if (o.ch < dayContentH(o)) o = { ...o, amount: 0 };
+  addCalendar(w, s, o);
+  w.addSpacer();
   addFooter(w, view, 9.5);
 }
 
 // 중간 위젯: 왼쪽에 작은 달력(숫자·표시만), 오른쪽에 잔액·총 지출·다가오는 결제와 일정 2개
 function buildMedium(w, s, view) {
-  w.setPadding(10, 12, 10, 12);
+  const pad = [10, 12, 10, 12];
+  w.setPadding(...pad);
+  const size = widgetSize('medium');
+  const innerW = size.width - pad[1] - pad[3];
+  const innerH = size.height - pad[0] - pad[2];
   const body = w.addStack();
   body.layoutHorizontally();
   body.topAlignContent();
-  addCalendar(body, s, { cw: 20, radius: 5, ring: 1.2, num: 10.5, head: 9, mark: 4, markGap: 1.5, marks: 3, more: false, gap: 1, amount: 0, rowGap: 1, colGap: 2 });
+  const base = { radius: 5, ring: 1.2, num: 10, head: 9, mark: 4, markGap: 1.5, marks: 3, more: false, gap: 1, amount: 0, rowGap: 1, colGap: 2 };
+  addCalendar(body, s, fitCalendar(base, Math.round(innerW * 0.48), innerH - 2, s.weeks.length));
   body.addSpacer(10);
   const side = body.addStack();
   side.layoutVertically();
